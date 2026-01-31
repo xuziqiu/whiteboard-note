@@ -1,0 +1,5 @@
+{
+  "name": "Whiteboard Note",
+  "description": "A spatial note-taking tool inspired by Heptabase. Create cards on an infinite canvas, connect ideas, and use Gemini AI to brainstorm and expand your thoughts into new connected notes.",
+  "requestFramePermissions": []
+}
