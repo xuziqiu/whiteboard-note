@@ -1,14 +1,12 @@
 import React, { useState, useCallback, useEffect } from 'react';
 import { Canvas } from './components/Canvas';
 import { Sidebar } from './components/Sidebar';
-import { ContextMenu } from './components/ContextMenu';
-import { NoteData, Connection, Camera, Position, ContextMenuState, ConnectionStyle } from './types';
-import { brainstormRelatedIdeas } from './services/geminiService';
+import { NoteData, Connection, Camera, Position, ConnectionStyle } from './types';
 import { Info } from 'lucide-react';
 
 const INITIAL_NOTE: NoteData = {
   id: '1',
-  content: 'Welcome to ThinkChain.\n\n• Double-click to edit\n• Drag to move\n• Right-click & drag to connect',
+  content: 'Double-click anywhere to create a note.\nDrag to move.\nRight-click & drag to connect.',
   position: { x: 100, y: 100 },
   size: { width: 280, height: 160 },
   color: 'white',
@@ -22,22 +20,13 @@ export default function App() {
   const [selectedNoteId, setSelectedNoteId] = useState<string | null>(null);
   const [connectionStyle, setConnectionStyle] = useState<ConnectionStyle>('curve');
   
-  // AI State
-  const [isProcessingAI, setIsProcessingAI] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
-  
-  const [contextMenu, setContextMenu] = useState<ContextMenuState>({
-    isOpen: false,
-    x: 0,
-    y: 0,
-    type: 'CANVAS',
-  });
 
   // Global Key Handler for Delete
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if ((e.key === 'Delete' || e.key === 'Backspace') && selectedNoteId) {
-        // Prevent deleting if editing text (usually handled by input focus, but good safeguard)
+        // Prevent deleting if editing text
         const activeTag = document.activeElement?.tagName;
         if (activeTag !== 'TEXTAREA' && activeTag !== 'INPUT') {
             setNotes(prev => prev.filter(n => n.id !== selectedNoteId));
@@ -92,28 +81,8 @@ export default function App() {
     return newNote.id;
   }, [handleConnect]);
 
-  const handleCanvasContextMenu = (e: React.MouseEvent) => {
-      setContextMenu({
-          isOpen: true,
-          x: e.clientX,
-          y: e.clientY,
-          type: 'CANVAS'
-      });
-  };
-
-  const handleContextMenuAction = (action: string, payload?: any) => {
-      const { x, y } = contextMenu;
-      const worldX = (x - camera.x) / camera.z;
-      const worldY = (y - camera.y) / camera.z;
-
-      switch(action) {
-          case 'CREATE_NOTE':
-              createNote({ x: worldX, y: worldY });
-              break;
-          case 'RESET_VIEW':
-              setCamera({ x: 0, y: 0, z: 1 });
-              break;
-      }
+  const handleCanvasDoubleClick = (pos: Position) => {
+      createNote(pos);
   };
 
   return (
@@ -132,9 +101,9 @@ export default function App() {
           onNoteMove={handleNoteMove}
           onNoteSelect={setSelectedNoteId}
           onConnect={handleConnect}
-          onCanvasClick={() => setContextMenu(p => ({ ...p, isOpen: false }))}
-          onCanvasContextMenu={handleCanvasContextMenu}
-          onNoteContextMenu={() => {}} 
+          onCanvasClick={() => {}}
+          onCanvasDoubleClick={handleCanvasDoubleClick}
+          onCanvasContextMenu={() => {}}
         />
 
         {errorMsg && (
@@ -142,16 +111,6 @@ export default function App() {
                 <Info size={16} />
                 <span>{errorMsg}</span>
             </div>
-        )}
-
-        {contextMenu.isOpen && (
-            <ContextMenu 
-                x={contextMenu.x}
-                y={contextMenu.y}
-                type={contextMenu.type}
-                onClose={() => setContextMenu(p => ({ ...p, isOpen: false }))}
-                onAction={handleContextMenuAction}
-            />
         )}
       </main>
     </div>

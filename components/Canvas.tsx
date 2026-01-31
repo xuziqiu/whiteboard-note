@@ -1,7 +1,6 @@
 import React, { useRef, useState, useEffect, useCallback } from 'react';
 import { Camera, NoteData, Connection, Position, Size, ConnectionStyle } from '../types';
 import { NoteCard } from './NoteCard';
-import { Maximize2, Minimize2 } from 'lucide-react';
 
 interface CanvasProps {
   notes: NoteData[];
@@ -12,16 +11,12 @@ interface CanvasProps {
   onNoteMove: (id: string, pos: Position) => void;
   onConnect: (sourceId: string, targetId: string) => void;
   onCanvasClick: (pos: Position) => void;
-  onCanvasContextMenu: (e: React.MouseEvent) => void;
+  onCanvasDoubleClick: (pos: Position) => void;
   selectedNoteId: string | null;
   camera: Camera;
   setCamera: React.Dispatch<React.SetStateAction<Camera>>;
 }
 
-/**
- * Calculates the intersection point between a line (from center to target)
- * and the border of a rectangle (centered at `center` with `size`).
- */
 function getIntersection(
   center: Position,
   size: Size,
@@ -50,8 +45,6 @@ function getPath(style: ConnectionStyle, start: Position, end: Position): string
 
   switch (style) {
     case 'curve':
-      const c1 = { x: start.x + dx / 2, y: start.y };
-      const c2 = { x: end.x - dx / 2, y: end.y };
       // Vertical curve preference
       if (Math.abs(dy) > Math.abs(dx)) {
          return `M ${start.x} ${start.y} C ${start.x} ${start.y + dy/2}, ${end.x} ${end.y - dy/2}, ${end.x} ${end.y}`;
@@ -77,7 +70,7 @@ export const Canvas: React.FC<CanvasProps> = ({
   onNoteMove,
   onConnect,
   onCanvasClick,
-  onCanvasContextMenu,
+  onCanvasDoubleClick,
   selectedNoteId,
   camera,
   setCamera,
@@ -168,6 +161,7 @@ export const Canvas: React.FC<CanvasProps> = ({
       setDragStart(current);
     } else if (isDraggingNote) {
       const current = getClientCoords(e);
+      // Ensure delta is calculated correctly relative to zoom
       const delta = { 
         x: (current.x - dragStart.x) / camera.z, 
         y: (current.y - dragStart.y) / camera.z 
@@ -230,13 +224,12 @@ export const Canvas: React.FC<CanvasProps> = ({
       className="w-full h-full overflow-hidden bg-slate-50 relative cursor-default select-none"
       onWheel={handleWheel}
       onMouseDown={handleMouseDown}
-      onContextMenu={(e) => {
-          e.preventDefault();
-          // Only show context menu if clicking on canvas, not while dragging connection
-          if (!isConnecting && e.target === containerRef.current) {
-             onCanvasContextMenu(e);
+      onDoubleClick={(e) => {
+          if (e.target === containerRef.current) {
+              onCanvasDoubleClick(screenToWorld(e.clientX, e.clientY));
           }
       }}
+      onContextMenu={(e) => e.preventDefault()}
     >
       <div 
         ref={containerRef}
@@ -290,22 +283,13 @@ export const Canvas: React.FC<CanvasProps> = ({
             note={note}
             scale={camera.z}
             isSelected={selectedNoteId === note.id}
+            isDragging={isDraggingNote === note.id}
             isTarget={hoveredTargetId === note.id}
             onSelect={onNoteSelect}
             onUpdate={onNoteUpdate}
             onMouseDown={handleNoteMouseDown}
           />
         ))}
-      </div>
-
-      {/* Mini Controls */}
-      <div className="absolute bottom-6 right-6 flex flex-col gap-2 bg-white p-2 rounded-lg shadow-md border border-slate-200 z-50">
-        <button className="p-2 hover:bg-slate-50 rounded text-slate-600" onClick={() => setCamera(c => ({ ...c, z: Math.min(c.z + 0.1, 5) }))}>
-          <Maximize2 size={20} />
-        </button>
-        <button className="p-2 hover:bg-slate-50 rounded text-slate-600" onClick={() => setCamera(c => ({ ...c, z: Math.max(c.z - 0.1, 0.1) }))}>
-          <Minimize2 size={20} />
-        </button>
       </div>
     </div>
   );

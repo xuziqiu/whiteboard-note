@@ -4,6 +4,7 @@ import { NoteData } from '../types';
 interface NoteCardProps {
   note: NoteData;
   isSelected: boolean;
+  isDragging: boolean;
   isTarget?: boolean;
   scale: number;
   onUpdate: (id: string, data: Partial<NoteData>) => void;
@@ -14,6 +15,7 @@ interface NoteCardProps {
 export const NoteCard: React.FC<NoteCardProps> = ({
   note,
   isSelected,
+  isDragging,
   isTarget,
   scale,
   onUpdate,
@@ -27,7 +29,6 @@ export const NoteCard: React.FC<NoteCardProps> = ({
   useEffect(() => {
     if (isEditing && textareaRef.current) {
       textareaRef.current.focus();
-      // Move cursor to end
       textareaRef.current.setSelectionRange(
         textareaRef.current.value.length,
         textareaRef.current.value.length
@@ -59,16 +60,16 @@ export const NoteCard: React.FC<NoteCardProps> = ({
 
   const handleBlur = () => {
     setIsEditing(false);
-    // Remove empty notes automatically? Optional. keeping for now.
   };
 
   return (
     <div
-      className={`absolute flex flex-col rounded-lg shadow-sm transition-all duration-200
+      className={`absolute flex flex-col rounded-lg shadow-sm border
         ${colorClasses[note.color]}
-        ${isSelected ? 'ring-2 ring-indigo-500 shadow-xl z-20' : 'hover:shadow-md z-10'}
+        ${/* CRITICAL: transition-none when dragging to ensure sticky 1:1 movement */ ''}
+        ${isDragging ? 'transition-none z-50 shadow-2xl scale-[1.01] cursor-grabbing' : 'transition-all duration-200 cursor-grab hover:shadow-md z-10'}
+        ${isSelected && !isDragging ? 'ring-2 ring-indigo-500 shadow-xl z-20' : ''}
         ${isTarget ? 'ring-2 ring-indigo-400 scale-[1.02] z-30' : ''}
-        border
       `}
       style={{
         left: note.position.x,
@@ -77,8 +78,6 @@ export const NoteCard: React.FC<NoteCardProps> = ({
         minHeight: Math.max(note.size.height, 60),
       }}
       onMouseDown={(e) => {
-        // If editing, don't trigger drag unless clicking border (handled by propagation)
-        // If not editing, trigger drag
         if (!isEditing) {
              onSelect(note.id);
              onMouseDown(e, note.id);
@@ -86,7 +85,6 @@ export const NoteCard: React.FC<NoteCardProps> = ({
       }}
       onDoubleClick={handleDoubleClick}
       onContextMenu={(e) => {
-        // Right click on note initiates connection in parent, suppress default menu
         e.preventDefault();
         e.stopPropagation();
         if (!isEditing) {
@@ -101,7 +99,7 @@ export const NoteCard: React.FC<NoteCardProps> = ({
             value={note.content}
             onChange={(e) => onUpdate(note.id, { content: e.target.value })}
             onBlur={handleBlur}
-            onMouseDown={(e) => e.stopPropagation()} // Allow text selection without dragging note
+            onMouseDown={(e) => e.stopPropagation()}
             className="w-full h-full bg-transparent outline-none resize-none text-base leading-relaxed overflow-hidden font-medium"
             placeholder="Type your thought..."
           />
@@ -112,7 +110,6 @@ export const NoteCard: React.FC<NoteCardProps> = ({
         )}
       </div>
       
-      {/* AI Loading Indicator */}
       {note.id.startsWith('ai-pending') && (
         <div className="absolute inset-0 bg-white/50 backdrop-blur-sm flex items-center justify-center rounded-lg z-30">
            <div className="w-4 h-4 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin"></div>
