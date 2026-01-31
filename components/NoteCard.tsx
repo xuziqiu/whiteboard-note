@@ -1,6 +1,5 @@
 import React, { useRef, useEffect, useState } from 'react';
-import { NoteData } from '../types';
-import { Sparkles } from 'lucide-react';
+import { NoteColor, NoteData } from '../types';
 
 interface NoteCardProps {
   note: NoteData;
@@ -11,7 +10,6 @@ interface NoteCardProps {
   onUpdate: (id: string, data: Partial<NoteData>) => void;
   onSelect: (id: string) => void;
   onMouseDown: (e: React.MouseEvent, id: string) => void;
-  onBrainstorm?: (id: string) => void; // Optional for safety
 }
 
 export const NoteCard: React.FC<NoteCardProps> = ({
@@ -23,7 +21,6 @@ export const NoteCard: React.FC<NoteCardProps> = ({
   onUpdate,
   onSelect,
   onMouseDown,
-  onBrainstorm,
 }) => {
   const [isEditing, setIsEditing] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -48,7 +45,7 @@ export const NoteCard: React.FC<NoteCardProps> = ({
   }, [note.content, isEditing]);
 
   // Sketch-style colors
-  const colorClasses = {
+  const colorClasses: Record<NoteColor, string> = {
     white: 'bg-white text-slate-800',
     blue: 'bg-[#E0F2FE] text-slate-800',
     yellow: 'bg-[#FEF3C7] text-slate-800',
@@ -56,6 +53,8 @@ export const NoteCard: React.FC<NoteCardProps> = ({
     red: 'bg-[#FEE2E2] text-slate-800',
     purple: 'bg-[#F3E8FF] text-slate-800',
   };
+
+  const colorOptions: NoteColor[] = ['white', 'blue', 'yellow', 'green', 'red', 'purple'];
 
   const handleDoubleClick = (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -84,7 +83,7 @@ export const NoteCard: React.FC<NoteCardProps> = ({
         top: note.position.y,
         width: note.size.width,
         minHeight: Math.max(note.size.height, 60),
-        borderRadius: '2px', // Slight rounding but mostly boxy for sketch feel
+        borderRadius: '2px',
       }}
       onMouseDown={(e) => {
         if (!isEditing) {
@@ -93,6 +92,20 @@ export const NoteCard: React.FC<NoteCardProps> = ({
       }}
       onDoubleClick={handleDoubleClick}
     >
+      {/* Color Picker - Show on Hover or Selection */}
+      <div className={`absolute -top-10 left-0 w-full flex justify-center gap-1 transition-opacity duration-200 ${isSelected || isEditing ? 'opacity-100 pointer-events-auto' : 'opacity-0 group-hover:opacity-100 pointer-events-none group-hover:pointer-events-auto'}`}>
+         <div className="bg-white border-2 border-slate-700 p-1 rounded-full flex gap-1 shadow-sm">
+            {colorOptions.map(c => (
+                <button
+                    key={c}
+                    onMouseDown={(e) => { e.stopPropagation(); onUpdate(note.id, { color: c }); }}
+                    className={`w-4 h-4 rounded-full border border-slate-300 hover:scale-125 transition-transform ${colorClasses[c].split(' ')[0]}`}
+                    title={c}
+                />
+            ))}
+         </div>
+      </div>
+
       <div className="flex-1 p-4 flex flex-col justify-center min-h-[60px]">
         {isEditing ? (
           <textarea
@@ -114,28 +127,6 @@ export const NoteCard: React.FC<NoteCardProps> = ({
           </div>
         )}
       </div>
-
-      {/* Suggestion: AI Button (visible on hover or selection) */}
-      {!isDragging && !isEditing && (isSelected || true) && (
-          <div className="absolute -top-3 -right-3 opacity-0 group-hover:opacity-100 transition-opacity">
-              <button 
-                  onClick={(e) => {
-                      e.stopPropagation();
-                      if(onBrainstorm) onBrainstorm(note.id);
-                  }}
-                  className="bg-indigo-600 text-white p-1.5 rounded-full shadow-lg hover:bg-indigo-700 hover:scale-110 transition-all border-2 border-white"
-                  title="AI Brainstorm"
-              >
-                  <Sparkles size={14} />
-              </button>
-          </div>
-      )}
-      
-      {note.id.startsWith('ai-pending') && (
-        <div className="absolute inset-0 bg-white/50 backdrop-blur-sm flex items-center justify-center z-30">
-           <div className="w-5 h-5 border-2 border-slate-700 border-t-transparent rounded-full animate-spin"></div>
-        </div>
-      )}
     </div>
   );
 };

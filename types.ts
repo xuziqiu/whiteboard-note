@@ -39,7 +39,6 @@ export interface ContextMenuState {
   type: 'CANVAS';
 }
 
-// AI Related Types
 export interface AIBrainstormResult {
   content: string;
 }

@@ -1,12 +1,12 @@
 import React, { useState, useCallback, useEffect } from 'react';
 import { Canvas } from './components/Canvas';
 import { Sidebar } from './components/Sidebar';
-import { NoteData, Connection, Camera, Position, ConnectionStyle } from './types';
-import { Info, X } from 'lucide-react';
+import { ContextMenu } from './components/ContextMenu';
+import { NoteData, Connection, Camera, Position, ConnectionStyle, ContextMenuState } from './types';
+import { Info, X, ZoomIn, ZoomOut, Scan } from 'lucide-react';
 // These imports are available via importmap in index.html
 import html2canvas from 'html2canvas';
 import jsPDF from 'jspdf';
-import { brainstormRelatedIdeas } from './services/geminiService';
 
 const INITIAL_NOTE: NoteData = {
   id: '1',
@@ -27,6 +27,7 @@ export default function App() {
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   
   const [mermaidModal, setMermaidModal] = useState<{isOpen: boolean, content: string}>({isOpen: false, content: ''});
+  const [menuState, setMenuState] = useState<ContextMenuState>({ isOpen: false, x: 0, y: 0, type: 'CANVAS' });
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -107,7 +108,6 @@ export default function App() {
     return newNote.id;
   }, []);
 
-  // New: Handle dropping a connection on empty space
   const handleCreateAndConnect = useCallback((sourceId: string, position: Position) => {
       // Center the new note on the cursor position
       const centeredPos = {
@@ -116,106 +116,6 @@ export default function App() {
       };
       createNote(centeredPos, '', sourceId);
   }, [createNote]);
-
-  // New: AI Brainstorm Logic
-  const handleAIBrainstorm = useCallback(async (sourceId: string) => {
-      const sourceNote = notes.find(n => n.id === sourceId);
-      if (!sourceNote || !sourceNote.content.trim()) {
-          setErrorMsg("Please add some text to the note first.");
-          return;
-      }
-
-      // 1. Add visual placeholder notes
-      const placeholderIds: string[] = [];
-      const angles = [-Math.PI / 4, 0, Math.PI / 4]; // Radial spread to the right
-      const distance = 400;
-
-      const newNotesData = angles.map((angle, i) => {
-          const id = `ai-pending-${Date.now()}-${i}`;
-          placeholderIds.push(id);
-          return {
-              id,
-              content: 'Thinking...',
-              position: {
-                  x: sourceNote.position.x + distance * Math.cos(angle) + sourceNote.size.width + 50,
-                  y: sourceNote.position.y + distance * Math.sin(angle) * 1.5, // Spread out vertically more
-              },
-              size: { width: 280, height: 140 },
-              color: 'white' as const,
-              createdAt: Date.now(),
-          };
-      });
-
-      setNotes(prev => [...prev, ...newNotesData]);
-      
-      // Link them immediately
-      setConnections(prev => [
-          ...prev, 
-          ...placeholderIds.map(toId => ({
-              id: Math.random().toString(36).substr(2, 9),
-              fromId: sourceId,
-              toId
-          }))
-      ]);
-
-      try {
-          // 2. Call API
-          const ideas = await brainstormRelatedIdeas(sourceNote.content);
-          
-          // 3. Update placeholders with real content
-          setNotes(prev => prev.map(n => {
-              const index = placeholderIds.indexOf(n.id);
-              if (index !== -1 && ideas[index]) {
-                  return {
-                      ...n,
-                      id: Math.random().toString(36).substr(2, 9), // Generate real ID
-                      content: ideas[index].content,
-                      color: ['blue', 'yellow', 'green', 'purple'][Math.floor(Math.random() * 4)] as any
-                  };
-              }
-              // If API returned fewer items, keep placeholder or remove? Let's keep simpler for now.
-              if (index !== -1) {
-                   return { ...n, id: Math.random().toString(36).substr(2, 9), content: '...' };
-              }
-              return n;
-          }));
-
-          // Fix connections for the renamed IDs (this is a bit tricky with state updates, 
-          // usually better to keep IDs stable, but let's just update the ID logic above)
-          // Simplified: We actually don't need to change ID if we don't want to, 
-          // but removing 'ai-pending' prefix removes the spinner.
-          
-          setNotes(prev => prev.map(n => {
-              if (placeholderIds.includes(n.id)) {
-                   const index = placeholderIds.indexOf(n.id);
-                   return {
-                       ...n,
-                       id: n.id.replace('ai-pending-', 'note-'), // remove pending status
-                       content: ideas[index]?.content || "Could not generate idea.",
-                       color: 'yellow'
-                   }
-              }
-              return n;
-          }));
-
-          // We need to update connection IDs to match the new note IDs? 
-          // No, wait, if we change the ID in `setNotes`, the connections pointing to `ai-pending` will break.
-          // Correct approach: Update connection targets too.
-          
-          setConnections(prev => prev.map(c => {
-               if (placeholderIds.includes(c.toId)) {
-                   return { ...c, toId: c.toId.replace('ai-pending-', 'note-') };
-               }
-               return c;
-          }));
-
-      } catch (e) {
-          setErrorMsg("AI generation failed. Check API Key.");
-          // Remove placeholders on error
-          setNotes(prev => prev.filter(n => !placeholderIds.includes(n.id)));
-          setConnections(prev => prev.filter(c => !placeholderIds.includes(c.toId)));
-      }
-  }, [notes]);
 
   const handleExportMermaid = () => {
       let graph = 'graph TD\n';
@@ -308,6 +208,66 @@ export default function App() {
     }
   };
 
+  const handleZoom = (delta: number) => {
+      setCamera(prev => ({
+          ...prev,
+          z: Math.min(Math.max(0.1, prev.z + delta), 5)
+      }));
+  };
+
+  const handleFitView = () => {
+      if (notes.length === 0) {
+          setCamera({ x: 0, y: 0, z: 1 });
+          return;
+      }
+      
+      let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+      notes.forEach(n => {
+          minX = Math.min(minX, n.position.x);
+          minY = Math.min(minY, n.position.y);
+          maxX = Math.max(maxX, n.position.x + n.size.width);
+          maxY = Math.max(maxY, n.position.y + n.size.height);
+      });
+
+      const padding = 100;
+      const contentW = maxX - minX + padding * 2;
+      const contentH = maxY - minY + padding * 2;
+      
+      const scaleX = window.innerWidth / contentW;
+      const scaleY = window.innerHeight / contentH;
+      const newZoom = Math.min(Math.min(scaleX, scaleY), 1); // Don't zoom in too much if content is small
+
+      // Center it
+      const centerX = (minX + maxX) / 2;
+      const centerY = (minY + maxY) / 2;
+      
+      const newX = window.innerWidth / 2 - centerX * newZoom;
+      const newY = window.innerHeight / 2 - centerY * newZoom;
+
+      setCamera({ x: newX, y: newY, z: newZoom });
+  };
+
+  const handleContextMenu = (e: React.MouseEvent) => {
+      e.preventDefault();
+      setMenuState({
+          isOpen: true,
+          x: e.clientX,
+          y: e.clientY,
+          type: 'CANVAS'
+      });
+  };
+
+  const handleMenuAction = (action: string) => {
+      if (action === 'CREATE_NOTE') {
+          // Create note at context menu location converted to world coords
+          const worldX = (menuState.x - camera.x) / camera.z;
+          const worldY = (menuState.y - camera.y) / camera.z;
+          createNote({ x: worldX, y: worldY });
+      } else if (action === 'RESET_VIEW') {
+          handleFitView();
+      }
+  };
+
   return (
     <div className="flex h-screen w-screen overflow-hidden text-slate-800 font-sans">
       <Sidebar 
@@ -332,8 +292,20 @@ export default function App() {
           onCreateAndConnect={handleCreateAndConnect}
           onDeleteNotes={handleDeleteNotes}
           onCanvasDoubleClick={(pos) => createNote(pos)}
-          onAIBrainstorm={handleAIBrainstorm}
+          onContextMenu={handleContextMenu}
         />
+
+        {/* Zoom Controls */}
+        <div className="fixed bottom-6 left-6 flex gap-2 z-50 no-print">
+            <div className="bg-white p-1 rounded-md shadow-md border-2 border-slate-200 flex items-center gap-1">
+                <button onClick={() => handleZoom(-0.1)} className="p-2 hover:bg-slate-100 rounded text-slate-600" title="Zoom Out"><ZoomOut size={20}/></button>
+                <span className="text-xs font-mono w-12 text-center">{(camera.z * 100).toFixed(0)}%</span>
+                <button onClick={() => handleZoom(0.1)} className="p-2 hover:bg-slate-100 rounded text-slate-600" title="Zoom In"><ZoomIn size={20}/></button>
+            </div>
+            <button onClick={handleFitView} className="bg-white p-3 rounded-md shadow-md border-2 border-slate-200 text-slate-600 hover:bg-slate-100" title="Fit to Screen">
+                <Scan size={20}/>
+            </button>
+        </div>
 
         {errorMsg && (
             <div className="absolute bottom-10 left-1/2 transform -translate-x-1/2 bg-red-50 text-red-600 border border-red-200 px-4 py-2 rounded-lg shadow-lg z-50 flex items-center gap-2 text-sm font-bold">
@@ -377,6 +349,17 @@ export default function App() {
                     </div>
                 </div>
             </div>
+        )}
+
+        {/* Context Menu */}
+        {menuState.isOpen && (
+            <ContextMenu 
+                x={menuState.x} 
+                y={menuState.y} 
+                type={menuState.type} 
+                onClose={() => setMenuState(prev => ({ ...prev, isOpen: false }))}
+                onAction={handleMenuAction}
+            />
         )}
       </main>
     </div>

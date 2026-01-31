@@ -11,10 +11,10 @@ interface CanvasProps {
   onNoteSelect: (ids: string[]) => void;
   onNoteMove: (id: string, delta: Position) => void;
   onConnect: (sourceId: string, targetId: string) => void;
-  onCreateAndConnect: (sourceId: string, position: Position) => void; // New prop
+  onCreateAndConnect: (sourceId: string, position: Position) => void;
   onDeleteNotes: (ids: string[]) => void;
   onCanvasDoubleClick: (pos: Position) => void;
-  onAIBrainstorm: (id: string) => void; // New prop for suggestion
+  onContextMenu: (e: React.MouseEvent) => void; // New Prop
   selectedNoteIds: string[];
   camera: Camera;
   setCamera: React.Dispatch<React.SetStateAction<Camera>>;
@@ -72,7 +72,7 @@ export const Canvas: React.FC<CanvasProps> = ({
   onCreateAndConnect,
   onDeleteNotes,
   onCanvasDoubleClick,
-  onAIBrainstorm,
+  onContextMenu,
   selectedNoteIds,
   camera,
   setCamera,
@@ -85,6 +85,7 @@ export const Canvas: React.FC<CanvasProps> = ({
 
   // Tracking data
   const [dragStart, setDragStart] = useState<Position>({ x: 0, y: 0 }); // Screen coords
+  const [dragDistance, setDragDistance] = useState(0); // Track if it was a click or a drag
   const [selectionBox, setSelectionBox] = useState<{ x: number, y: number, w: number, h: number } | null>(null);
   const [potentialSelectionIds, setPotentialSelectionIds] = useState<string[]>([]); 
   
@@ -110,17 +111,11 @@ export const Canvas: React.FC<CanvasProps> = ({
 
   const handleWheel = (e: React.WheelEvent) => {
     e.preventDefault();
-    
-    // Zoom by default as requested
     const zoomSensitivity = 0.001;
-    // Clamp zoom between 0.1 and 5
     const newZoom = Math.min(Math.max(0.1, camera.z - e.deltaY * zoomSensitivity), 5);
-    
-    // Zoom towards mouse pointer
     const mouseWorld = screenToWorld(e.clientX, e.clientY);
     const newX = e.clientX - mouseWorld.x * newZoom;
     const newY = e.clientY - mouseWorld.y * newZoom;
-    
     setCamera({ x: newX, y: newY, z: newZoom });
   };
 
@@ -129,9 +124,9 @@ export const Canvas: React.FC<CanvasProps> = ({
     const isLeftClick = e.button === 0;
     const target = e.target as HTMLElement;
     const isCanvas = target === containerRef.current || target.tagName === 'svg';
-    const isNote = target.closest('.note-card');
-
+    
     setDragStart(getClientCoords(e));
+    setDragDistance(0); // Reset distance
 
     if (isCanvas) {
         if (isRightClick) {
@@ -154,6 +149,7 @@ export const Canvas: React.FC<CanvasProps> = ({
       const isLeftClick = e.button === 0;
 
       setDragStart(getClientCoords(e));
+      setDragDistance(0);
 
       if (isRightClick) {
           setMode('CONNECTING');
@@ -175,6 +171,10 @@ export const Canvas: React.FC<CanvasProps> = ({
     if (mode === 'NONE') return;
 
     const current = getClientCoords(e);
+    // Calc distance to distinguish click vs drag
+    const dist = Math.sqrt(Math.pow(current.x - dragStart.x, 2) + Math.pow(current.y - dragStart.y, 2));
+    setDragDistance(d => Math.max(d, dist));
+
     const worldPos = screenToWorld(e.clientX, e.clientY);
 
     if (mode === 'PANNING') {
@@ -186,21 +186,17 @@ export const Canvas: React.FC<CanvasProps> = ({
         if (selectionBox) {
             const newW = worldPos.x - selectionBox.x;
             const newH = worldPos.y - selectionBox.y;
-            
             setSelectionBox(prev => ({ ...prev!, w: newW, h: newH }));
-
             const x = newW < 0 ? selectionBox.x + newW : selectionBox.x;
             const y = newH < 0 ? selectionBox.y + newH : selectionBox.y;
             const w = Math.abs(newW);
             const h = Math.abs(newH);
-
             const hitNotes = notes.filter(n => 
                 n.position.x < x + w &&
                 n.position.x + n.size.width > x &&
                 n.position.y < y + h &&
                 n.position.y + n.size.height > y
             ).map(n => n.id);
-            
             setPotentialSelectionIds(hitNotes);
         }
     }
@@ -213,7 +209,6 @@ export const Canvas: React.FC<CanvasProps> = ({
             onNoteMove(selectedNoteIds[0], delta);
         }
         setDragStart(current);
-
         const deleteZoneSize = 200;
         const distToCorner = Math.sqrt(
             Math.pow(window.innerWidth - e.clientX, 2) + 
@@ -223,28 +218,30 @@ export const Canvas: React.FC<CanvasProps> = ({
     }
     else if (mode === 'CONNECTING') {
         setMouseWorldPos(worldPos);
-        const targetNote = notes.find(n => {
-            if (n.id === connectionStartId) return false;
-            return (
-                worldPos.x >= n.position.x &&
-                worldPos.x <= n.position.x + n.size.width &&
-                worldPos.y >= n.position.y &&
-                worldPos.y <= n.position.y + n.size.height
-            );
-        });
+        const targetNote = notes.filter(n => n.id !== connectionStartId).find(n => 
+            worldPos.x >= n.position.x &&
+            worldPos.x <= n.position.x + n.size.width &&
+            worldPos.y >= n.position.y &&
+            worldPos.y <= n.position.y + n.size.height
+        );
         setHoveredTargetId(targetNote ? targetNote.id : null);
     }
   }, [mode, dragStart, camera, selectionBox, selectedNoteIds, onNoteMove, notes, connectionStartId, screenToWorld]);
 
   const handleMouseUp = useCallback((e: MouseEvent) => {
-    // Logic: Connect to existing note OR Create new note on empty space
+    // Check if it was a right-click without drag (ContextMenu)
+    if (mode === 'PANNING' && dragDistance < 5) {
+        onContextMenu(e as unknown as React.MouseEvent);
+    }
+
     if (mode === 'CONNECTING' && connectionStartId) {
         if (hoveredTargetId) {
             onConnect(connectionStartId, hoveredTargetId);
         } else {
-            // Dropped on empty space - Create and Connect
-            // We use mouseWorldPos which tracks the end of the line
-            onCreateAndConnect(connectionStartId, mouseWorldPos);
+            // Only create if dragged far enough, otherwise it might be accidental
+            if (dragDistance > 10) {
+                onCreateAndConnect(connectionStartId, mouseWorldPos);
+            }
         }
     }
 
@@ -261,14 +258,13 @@ export const Canvas: React.FC<CanvasProps> = ({
         onDeleteNotes(selectedNoteIds);
     }
 
-    // Reset
     setMode('NONE');
     setSelectionBox(null);
     setPotentialSelectionIds([]);
     setConnectionStartId(null);
     setHoveredTargetId(null);
     setIsOverDeleteZone(false);
-  }, [mode, connectionStartId, hoveredTargetId, onConnect, onCreateAndConnect, mouseWorldPos, potentialSelectionIds, selectedNoteIds, onNoteSelect, isOverDeleteZone, onDeleteNotes]);
+  }, [mode, connectionStartId, hoveredTargetId, onConnect, onCreateAndConnect, mouseWorldPos, potentialSelectionIds, selectedNoteIds, onNoteSelect, isOverDeleteZone, onDeleteNotes, dragDistance, onContextMenu]);
 
   useEffect(() => {
     window.addEventListener('mousemove', handleMouseMove);
@@ -354,7 +350,6 @@ export const Canvas: React.FC<CanvasProps> = ({
               (() => {
                   const startNote = notes.find(n => n.id === connectionStartId);
                   if (!startNote) return null;
-                  // If we are hovering a target, snap to it, otherwise follow mouse
                   let endCenter = mouseWorldPos;
                   let endSize = undefined;
                   if (hoveredTargetId) {
@@ -396,7 +391,6 @@ export const Canvas: React.FC<CanvasProps> = ({
             onSelect={(id) => onNoteSelect([id])}
             onUpdate={onNoteUpdate}
             onMouseDown={handleNoteMouseDown}
-            onBrainstorm={onAIBrainstorm}
           />
         ))}
       </div>
