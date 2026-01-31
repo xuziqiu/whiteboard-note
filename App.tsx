@@ -125,14 +125,9 @@ export default function App() {
   };
 
   const handleExportPDF = async () => {
-    const root = document.querySelector('.dot-grid') as HTMLElement;
-    if (!root) return;
+    if (notes.length === 0) return;
 
-    // 1. Temporarily reset transform to capture full canvas
-    const originalTransform = root.style.transform;
-    const originalTransition = root.style.transition;
-    
-    // Find bounds
+    // 1. Calculate the bounding box of the content
     let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
     notes.forEach(n => {
         minX = Math.min(minX, n.position.x);
@@ -141,22 +136,48 @@ export default function App() {
         maxY = Math.max(maxY, n.position.y + n.size.height);
     });
     
-    // Add padding
     const padding = 50;
-    minX -= padding; minY -= padding; maxX += padding; maxY += padding;
-    const width = maxX - minX;
-    const height = maxY - minY;
+    // Ensure we don't crash on empty canvas
+    if (minX === Infinity) { minX=0; minY=0; maxX=100; maxY=100; }
 
-    // Force style for capture
-    root.style.transition = 'none';
-    root.style.transform = `translate(${-minX}px, ${-minY}px) scale(1)`;
-    root.style.width = `${width}px`;
-    root.style.height = `${height}px`;
+    const width = maxX - minX + (padding * 2);
+    const height = maxY - minY + (padding * 2);
+
+    // 2. Clone the content element
+    const source = document.getElementById('canvas-content');
+    if (!source) return;
+
+    const clone = source.cloneNode(true) as HTMLElement;
+    
+    // 3. Create a wrapper to hold the clone off-screen
+    const wrapper = document.createElement('div');
+    wrapper.style.position = 'fixed';
+    wrapper.style.top = '0';
+    wrapper.style.left = '0'; // Keep it visible for html2canvas to capture properly
+    wrapper.style.width = `${width}px`;
+    wrapper.style.height = `${height}px`;
+    wrapper.style.zIndex = '-9999';
+    wrapper.style.overflow = 'hidden';
+    wrapper.style.backgroundColor = '#f8fafc'; // Match bg color
+    // Add grid pattern to export if desired, but clean is usually better for PDF
+    // wrapper.className = 'dot-grid'; 
+    
+    // 4. Reset transform on the clone and shift it so content is at (padding, padding)
+    clone.style.transform = `translate(${-minX + padding}px, ${-minY + padding}px) scale(1)`;
+    clone.style.position = 'absolute';
+    clone.style.left = '0';
+    clone.style.top = '0';
+    clone.style.width = '100%';
+    clone.style.height = '100%';
+    
+    wrapper.appendChild(clone);
+    document.body.appendChild(wrapper);
 
     try {
-        const canvas = await html2canvas(root, {
+        const canvas = await html2canvas(wrapper, {
             backgroundColor: '#f8fafc',
-            scale: 2, // Better quality
+            scale: 2, 
+            logging: false,
             ignoreElements: (element) => element.classList.contains('no-print'),
         });
 
@@ -164,7 +185,7 @@ export default function App() {
         const pdf = new jsPDF({
             orientation: width > height ? 'l' : 'p',
             unit: 'px',
-            format: [width, height] // Custom size based on content
+            format: [width, height]
         });
 
         pdf.addImage(imgData, 'PNG', 0, 0, width, height);
@@ -174,11 +195,7 @@ export default function App() {
         console.error("PDF Export failed", e);
         setErrorMsg("Failed to generate PDF. Please try again.");
     } finally {
-        // Restore
-        root.style.transform = originalTransform;
-        root.style.transition = originalTransition;
-        root.style.width = '';
-        root.style.height = '';
+        document.body.removeChild(wrapper);
     }
   };
 

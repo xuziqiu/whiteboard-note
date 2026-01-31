@@ -300,7 +300,12 @@ export const Canvas: React.FC<CanvasProps> = ({
 
   return (
     <div 
-      className="w-full h-full overflow-hidden relative cursor-default select-none"
+      className="w-full h-full overflow-hidden relative cursor-default select-none dot-grid"
+      style={{
+          // Move grid background logic here for infinite scroll
+          backgroundPosition: `${camera.x}px ${camera.y}px`,
+          backgroundSize: `${24 * camera.z}px ${24 * camera.z}px`
+      }}
       onWheel={handleWheel}
       onMouseDown={handleMouseDown}
       onDoubleClick={(e) => {
@@ -312,7 +317,8 @@ export const Canvas: React.FC<CanvasProps> = ({
     >
       <div 
         ref={containerRef}
-        className="absolute inset-0 origin-top-left dot-grid"
+        id="canvas-content"
+        className="absolute inset-0 origin-top-left"
         style={{
           transform: `translate(${camera.x}px, ${camera.y}px) scale(${camera.z})`,
         }}
