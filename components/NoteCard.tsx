@@ -1,131 +1,121 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useRef, useEffect, useState } from 'react';
 import { NoteData } from '../types';
-import { MoreHorizontal, Sparkles, X, Move, Maximize2, Minimize2 } from 'lucide-react';
 
 interface NoteCardProps {
   note: NoteData;
   isSelected: boolean;
+  isTarget?: boolean;
   scale: number;
   onUpdate: (id: string, data: Partial<NoteData>) => void;
   onSelect: (id: string) => void;
-  onDelete: (id: string) => void;
-  onBrainstorm: (id: string) => void;
   onMouseDown: (e: React.MouseEvent, id: string) => void;
 }
 
 export const NoteCard: React.FC<NoteCardProps> = ({
   note,
   isSelected,
+  isTarget,
   scale,
   onUpdate,
   onSelect,
-  onDelete,
-  onBrainstorm,
   onMouseDown,
 }) => {
   const [isEditing, setIsEditing] = useState(false);
-  const titleRef = useRef<HTMLInputElement>(null);
-  const contentRef = useRef<HTMLTextAreaElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
 
-  // Auto-resize textarea
+  // Focus textarea when entering edit mode
   useEffect(() => {
-    if (contentRef.current) {
-      contentRef.current.style.height = 'auto';
-      contentRef.current.style.height = contentRef.current.scrollHeight + 'px';
+    if (isEditing && textareaRef.current) {
+      textareaRef.current.focus();
+      // Move cursor to end
+      textareaRef.current.setSelectionRange(
+        textareaRef.current.value.length,
+        textareaRef.current.value.length
+      );
     }
-  }, [note.content]);
+  }, [isEditing]);
+
+  // Auto-resize
+  useEffect(() => {
+    if (textareaRef.current) {
+        textareaRef.current.style.height = 'auto';
+        textareaRef.current.style.height = textareaRef.current.scrollHeight + 'px';
+    }
+  }, [note.content, isEditing]);
 
   const colorClasses = {
-    white: 'bg-white border-slate-200',
-    blue: 'bg-blue-50 border-blue-200',
-    yellow: 'bg-yellow-50 border-yellow-200',
-    green: 'bg-green-50 border-green-200',
-    red: 'bg-red-50 border-red-200',
-    purple: 'bg-purple-50 border-purple-200',
+    white: 'bg-white border-slate-200 text-slate-700',
+    blue: 'bg-blue-50 border-blue-200 text-blue-900',
+    yellow: 'bg-yellow-50 border-yellow-200 text-yellow-900',
+    green: 'bg-green-50 border-green-200 text-green-900',
+    red: 'bg-red-50 border-red-200 text-red-900',
+    purple: 'bg-purple-50 border-purple-200 text-purple-900',
   };
 
-  const handleMouseDown = (e: React.MouseEvent) => {
+  const handleDoubleClick = (e: React.MouseEvent) => {
     e.stopPropagation();
-    onSelect(note.id);
-    onMouseDown(e, note.id);
+    setIsEditing(true);
   };
 
-  const handleAI = (e: React.MouseEvent) => {
-    e.stopPropagation();
-    onBrainstorm(note.id);
+  const handleBlur = () => {
+    setIsEditing(false);
+    // Remove empty notes automatically? Optional. keeping for now.
   };
 
   return (
     <div
-      className={`absolute flex flex-col rounded-xl shadow-sm transition-shadow duration-200 group
+      className={`absolute flex flex-col rounded-lg shadow-sm transition-all duration-200
         ${colorClasses[note.color]}
         ${isSelected ? 'ring-2 ring-indigo-500 shadow-xl z-20' : 'hover:shadow-md z-10'}
+        ${isTarget ? 'ring-2 ring-indigo-400 scale-[1.02] z-30' : ''}
+        border
       `}
       style={{
         left: note.position.x,
         top: note.position.y,
         width: note.size.width,
-        minHeight: note.size.height,
-        // Scale transform is handled by the canvas parent usually, 
-        // but here we just position absolutely. 
-        // The scale prop helps us adjust interaction thresholds if needed, but not used for CSS scale here.
+        minHeight: Math.max(note.size.height, 60),
       }}
-      onClick={(e) => {
+      onMouseDown={(e) => {
+        // If editing, don't trigger drag unless clicking border (handled by propagation)
+        // If not editing, trigger drag
+        if (!isEditing) {
+             onSelect(note.id);
+             onMouseDown(e, note.id);
+        }
+      }}
+      onDoubleClick={handleDoubleClick}
+      onContextMenu={(e) => {
+        // Right click on note initiates connection in parent, suppress default menu
+        e.preventDefault();
         e.stopPropagation();
-        onSelect(note.id);
+        if (!isEditing) {
+            onMouseDown(e, note.id); // Pass to canvas to handle "Right Click Drag"
+        }
       }}
     >
-      {/* Header / Drag Handle */}
-      <div
-        className="h-8 flex items-center justify-between px-3 cursor-grab active:cursor-grabbing border-b border-black/5"
-        onMouseDown={handleMouseDown}
-      >
-        <div className="flex items-center gap-2">
-           <div className={`w-2 h-2 rounded-full ${isSelected ? 'bg-indigo-500' : 'bg-slate-300'}`} />
-        </div>
-        
-        <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-           <button 
-             onClick={handleAI}
-             className="p-1 hover:bg-black/5 rounded text-indigo-600 transition-colors"
-             title="Brainstorm with AI"
-           >
-             <Sparkles size={14} />
-           </button>
-           <button 
-             onClick={(e) => { e.stopPropagation(); onDelete(note.id); }}
-             className="p-1 hover:bg-red-100 rounded text-red-400 hover:text-red-500 transition-colors"
-           >
-             <X size={14} />
-           </button>
-        </div>
-      </div>
-
-      {/* Content Area */}
-      <div className="flex-1 p-4 flex flex-col gap-2 cursor-text">
-        <input
-          ref={titleRef}
-          value={note.title}
-          onChange={(e) => onUpdate(note.id, { title: e.target.value })}
-          placeholder="Title"
-          className="w-full bg-transparent font-semibold text-slate-800 placeholder-slate-400 outline-none text-lg"
-        />
-        <textarea
-          ref={contentRef}
-          value={note.content}
-          onChange={(e) => onUpdate(note.id, { content: e.target.value })}
-          placeholder="Start typing..."
-          className="w-full bg-transparent text-slate-600 placeholder-slate-300 outline-none resize-none text-sm leading-relaxed no-scrollbar flex-1 min-h-[60px]"
-        />
+      <div className="flex-1 p-4 flex flex-col justify-center min-h-[60px]">
+        {isEditing ? (
+          <textarea
+            ref={textareaRef}
+            value={note.content}
+            onChange={(e) => onUpdate(note.id, { content: e.target.value })}
+            onBlur={handleBlur}
+            onMouseDown={(e) => e.stopPropagation()} // Allow text selection without dragging note
+            className="w-full h-full bg-transparent outline-none resize-none text-base leading-relaxed overflow-hidden font-medium"
+            placeholder="Type your thought..."
+          />
+        ) : (
+          <div className="whitespace-pre-wrap text-base leading-relaxed font-medium pointer-events-none select-none empty:text-slate-400 empty:after:content-['Empty_card']">
+            {note.content}
+          </div>
+        )}
       </div>
       
-      {/* AI Indicator (Visual flair) */}
+      {/* AI Loading Indicator */}
       {note.id.startsWith('ai-pending') && (
-        <div className="absolute inset-0 bg-white/50 backdrop-blur-sm flex items-center justify-center rounded-xl z-30">
-           <div className="flex flex-col items-center gap-2 text-indigo-600 animate-pulse">
-              <Sparkles className="animate-spin-slow" size={24} />
-              <span className="text-xs font-medium">Thinking...</span>
-           </div>
+        <div className="absolute inset-0 bg-white/50 backdrop-blur-sm flex items-center justify-center rounded-lg z-30">
+           <div className="w-4 h-4 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin"></div>
         </div>
       )}
     </div>

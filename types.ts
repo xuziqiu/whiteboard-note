@@ -8,13 +8,15 @@ export interface Size {
   height: number;
 }
 
+export type NoteColor = 'white' | 'blue' | 'yellow' | 'green' | 'red' | 'purple';
+export type ConnectionStyle = 'straight' | 'curve' | 'step';
+
 export interface NoteData {
   id: string;
-  title: string;
   content: string;
   position: Position;
   size: Size;
-  color: 'white' | 'blue' | 'yellow' | 'green' | 'red' | 'purple';
+  color: NoteColor;
   createdAt: number;
 }
 
@@ -30,14 +32,14 @@ export interface Camera {
   z: number; // Zoom level
 }
 
-export enum ToolType {
-  SELECT = 'SELECT',
-  HAND = 'HAND',
-  CREATE = 'CREATE',
+export interface ContextMenuState {
+  isOpen: boolean;
+  x: number;
+  y: number;
+  type: 'CANVAS';
 }
 
 // AI Related Types
 export interface AIBrainstormResult {
-  title: string;
   content: string;
 }
