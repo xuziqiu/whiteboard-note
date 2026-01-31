@@ -44,13 +44,14 @@ export const NoteCard: React.FC<NoteCardProps> = ({
     }
   }, [note.content, isEditing]);
 
+  // Sketch-style colors
   const colorClasses = {
-    white: 'bg-white border-slate-200 text-slate-700',
-    blue: 'bg-blue-50 border-blue-200 text-blue-900',
-    yellow: 'bg-yellow-50 border-yellow-200 text-yellow-900',
-    green: 'bg-green-50 border-green-200 text-green-900',
-    red: 'bg-red-50 border-red-200 text-red-900',
-    purple: 'bg-purple-50 border-purple-200 text-purple-900',
+    white: 'bg-white text-slate-800',
+    blue: 'bg-[#E0F2FE] text-slate-800',
+    yellow: 'bg-[#FEF3C7] text-slate-800',
+    green: 'bg-[#DCFCE7] text-slate-800',
+    red: 'bg-[#FEE2E2] text-slate-800',
+    purple: 'bg-[#F3E8FF] text-slate-800',
   };
 
   const handleDoubleClick = (e: React.MouseEvent) => {
@@ -64,33 +65,30 @@ export const NoteCard: React.FC<NoteCardProps> = ({
 
   return (
     <div
-      className={`absolute flex flex-col rounded-lg shadow-sm border
+      className={`absolute flex flex-col transition-transform
         ${colorClasses[note.color]}
-        ${/* CRITICAL: transition-none when dragging to ensure sticky 1:1 movement */ ''}
-        ${isDragging ? 'transition-none z-50 shadow-2xl scale-[1.01] cursor-grabbing' : 'transition-all duration-200 cursor-grab hover:shadow-md z-10'}
-        ${isSelected && !isDragging ? 'ring-2 ring-indigo-500 shadow-xl z-20' : ''}
-        ${isTarget ? 'ring-2 ring-indigo-400 scale-[1.02] z-30' : ''}
+        /* Sketch Style Borders and Shadows */
+        border-2 border-slate-700
+        ${isDragging 
+            ? 'z-50 shadow-[8px_8px_0px_0px_rgba(51,65,85,0.4)] scale-[1.02] cursor-grabbing transition-none' 
+            : 'z-10 shadow-[4px_4px_0px_0px_rgba(51,65,85,1)] hover:shadow-[6px_6px_0px_0px_rgba(51,65,85,1)] hover:-translate-y-0.5 cursor-grab duration-200'}
+        
+        ${isSelected && !isDragging ? 'ring-2 ring-dashed ring-indigo-500 ring-offset-2 z-20' : ''}
+        ${isTarget ? 'ring-4 ring-indigo-400/50 scale-[1.05] z-30' : ''}
       `}
       style={{
         left: note.position.x,
         top: note.position.y,
         width: note.size.width,
         minHeight: Math.max(note.size.height, 60),
+        borderRadius: '2px', // Slight rounding but mostly boxy for sketch feel
       }}
       onMouseDown={(e) => {
         if (!isEditing) {
-             onSelect(note.id);
              onMouseDown(e, note.id);
         }
       }}
       onDoubleClick={handleDoubleClick}
-      onContextMenu={(e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        if (!isEditing) {
-            onMouseDown(e, note.id); // Pass to canvas to handle "Right Click Drag"
-        }
-      }}
     >
       <div className="flex-1 p-4 flex flex-col justify-center min-h-[60px]">
         {isEditing ? (
@@ -99,20 +97,24 @@ export const NoteCard: React.FC<NoteCardProps> = ({
             value={note.content}
             onChange={(e) => onUpdate(note.id, { content: e.target.value })}
             onBlur={handleBlur}
-            onMouseDown={(e) => e.stopPropagation()}
-            className="w-full h-full bg-transparent outline-none resize-none text-base leading-relaxed overflow-hidden font-medium"
+            onMouseDown={(e) => e.stopPropagation()} 
+            className="w-full h-full bg-transparent outline-none resize-none text-lg leading-snug overflow-hidden"
+            style={{ fontFamily: '"Patrick Hand", cursive' }}
             placeholder="Type your thought..."
           />
         ) : (
-          <div className="whitespace-pre-wrap text-base leading-relaxed font-medium pointer-events-none select-none empty:text-slate-400 empty:after:content-['Empty_card']">
+          <div 
+            className="whitespace-pre-wrap text-lg leading-snug pointer-events-none select-none empty:text-slate-400 empty:after:content-['Empty_card']"
+            style={{ fontFamily: '"Patrick Hand", cursive' }}
+          >
             {note.content}
           </div>
         )}
       </div>
       
       {note.id.startsWith('ai-pending') && (
-        <div className="absolute inset-0 bg-white/50 backdrop-blur-sm flex items-center justify-center rounded-lg z-30">
-           <div className="w-4 h-4 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin"></div>
+        <div className="absolute inset-0 bg-white/50 backdrop-blur-sm flex items-center justify-center z-30">
+           <div className="w-5 h-5 border-2 border-slate-700 border-t-transparent rounded-full animate-spin"></div>
         </div>
       )}
     </div>

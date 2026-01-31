@@ -5,10 +5,10 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>ThinkChain</title>
     <script src="https://cdn.tailwindcss.com"></script>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Patrick+Hand&display=swap" rel="stylesheet">
     <style>
       body {
-        font-family: 'Inter', sans-serif;
+        font-family: 'Patrick Hand', cursive;
         overflow: hidden; /* Prevent native scroll on the body */
         background-color: #f8fafc;
       }
@@ -22,8 +22,15 @@
       }
       /* Grid pattern for the canvas */
       .dot-grid {
-        background-image: radial-gradient(#cbd5e1 1.5px, transparent 1.5px);
+        background-image: radial-gradient(#94a3b8 1.5px, transparent 1.5px);
         background-size: 24px 24px;
+      }
+      
+      /* Hide UI for print/pdf export if needed */
+      @media print {
+        .no-print {
+          display: none !important;
+        }
       }
     </style>
   <script type="importmap">
@@ -33,7 +40,9 @@
     "react-dom/": "https://esm.sh/react-dom@^19.2.4/",
     "react/": "https://esm.sh/react@^19.2.4/",
     "react": "https://esm.sh/react@^19.2.4",
-    "lucide-react": "https://esm.sh/lucide-react@^0.563.0"
+    "lucide-react": "https://esm.sh/lucide-react@^0.563.0",
+    "html2canvas": "https://esm.sh/html2canvas@^1.4.1",
+    "jspdf": "https://esm.sh/jspdf@^2.5.1"
   }
 }
 </script>
