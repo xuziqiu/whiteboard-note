@@ -54,8 +54,6 @@ export const NoteCard: React.FC<NoteCardProps> = ({
     purple: 'bg-[#F3E8FF] text-slate-800',
   };
 
-  const colorOptions: NoteColor[] = ['white', 'blue', 'yellow', 'green', 'red', 'purple'];
-
   const handleDoubleClick = (e: React.MouseEvent) => {
     e.stopPropagation();
     setIsEditing(true);
@@ -92,20 +90,6 @@ export const NoteCard: React.FC<NoteCardProps> = ({
       }}
       onDoubleClick={handleDoubleClick}
     >
-      {/* Color Picker - Show on Hover or Selection */}
-      <div className={`absolute -top-10 left-0 w-full flex justify-center gap-1 transition-opacity duration-200 ${isSelected || isEditing ? 'opacity-100 pointer-events-auto' : 'opacity-0 group-hover:opacity-100 pointer-events-none group-hover:pointer-events-auto'}`}>
-         <div className="bg-white border-2 border-slate-700 p-1 rounded-full flex gap-1 shadow-sm">
-            {colorOptions.map(c => (
-                <button
-                    key={c}
-                    onMouseDown={(e) => { e.stopPropagation(); onUpdate(note.id, { color: c }); }}
-                    className={`w-4 h-4 rounded-full border border-slate-300 hover:scale-125 transition-transform ${colorClasses[c].split(' ')[0]}`}
-                    title={c}
-                />
-            ))}
-         </div>
-      </div>
-
       <div className="flex-1 p-4 flex flex-col justify-center min-h-[60px]">
         {isEditing ? (
           <textarea
