@@ -11,8 +11,10 @@ interface CanvasProps {
   onNoteSelect: (ids: string[]) => void;
   onNoteMove: (id: string, delta: Position) => void;
   onConnect: (sourceId: string, targetId: string) => void;
+  onCreateAndConnect: (sourceId: string, position: Position) => void; // New prop
   onDeleteNotes: (ids: string[]) => void;
   onCanvasDoubleClick: (pos: Position) => void;
+  onAIBrainstorm: (id: string) => void; // New prop for suggestion
   selectedNoteIds: string[];
   camera: Camera;
   setCamera: React.Dispatch<React.SetStateAction<Camera>>;
@@ -67,8 +69,10 @@ export const Canvas: React.FC<CanvasProps> = ({
   onNoteSelect,
   onNoteMove,
   onConnect,
+  onCreateAndConnect,
   onDeleteNotes,
   onCanvasDoubleClick,
+  onAIBrainstorm,
   selectedNoteIds,
   camera,
   setCamera,
@@ -82,7 +86,7 @@ export const Canvas: React.FC<CanvasProps> = ({
   // Tracking data
   const [dragStart, setDragStart] = useState<Position>({ x: 0, y: 0 }); // Screen coords
   const [selectionBox, setSelectionBox] = useState<{ x: number, y: number, w: number, h: number } | null>(null);
-  const [potentialSelectionIds, setPotentialSelectionIds] = useState<string[]>([]); // Highlighting during drag
+  const [potentialSelectionIds, setPotentialSelectionIds] = useState<string[]>([]); 
   
   // Connection specific
   const [connectionStartId, setConnectionStartId] = useState<string | null>(null);
@@ -105,17 +109,19 @@ export const Canvas: React.FC<CanvasProps> = ({
   }, [camera]);
 
   const handleWheel = (e: React.WheelEvent) => {
-    if (e.ctrlKey || e.metaKey) {
-      e.preventDefault();
-      const zoomSensitivity = 0.001;
-      const newZoom = Math.min(Math.max(0.1, camera.z - e.deltaY * zoomSensitivity), 5);
-      const mouseWorld = screenToWorld(e.clientX, e.clientY);
-      const newX = e.clientX - mouseWorld.x * newZoom;
-      const newY = e.clientY - mouseWorld.y * newZoom;
-      setCamera({ x: newX, y: newY, z: newZoom });
-    } else {
-      setCamera(prev => ({ ...prev, x: prev.x - e.deltaX, y: prev.y - e.deltaY }));
-    }
+    e.preventDefault();
+    
+    // Zoom by default as requested
+    const zoomSensitivity = 0.001;
+    // Clamp zoom between 0.1 and 5
+    const newZoom = Math.min(Math.max(0.1, camera.z - e.deltaY * zoomSensitivity), 5);
+    
+    // Zoom towards mouse pointer
+    const mouseWorld = screenToWorld(e.clientX, e.clientY);
+    const newX = e.clientX - mouseWorld.x * newZoom;
+    const newY = e.clientY - mouseWorld.y * newZoom;
+    
+    setCamera({ x: newX, y: newY, z: newZoom });
   };
 
   const handleMouseDown = (e: React.MouseEvent) => {
@@ -183,7 +189,6 @@ export const Canvas: React.FC<CanvasProps> = ({
             
             setSelectionBox(prev => ({ ...prev!, w: newW, h: newH }));
 
-            // Calculate potential selection in real-time
             const x = newW < 0 ? selectionBox.x + newW : selectionBox.x;
             const y = newH < 0 ? selectionBox.y + newH : selectionBox.y;
             const w = Math.abs(newW);
@@ -209,7 +214,6 @@ export const Canvas: React.FC<CanvasProps> = ({
         }
         setDragStart(current);
 
-        // Check Delete Zone (Larger Zone: 200px)
         const deleteZoneSize = 200;
         const distToCorner = Math.sqrt(
             Math.pow(window.innerWidth - e.clientX, 2) + 
@@ -233,8 +237,15 @@ export const Canvas: React.FC<CanvasProps> = ({
   }, [mode, dragStart, camera, selectionBox, selectedNoteIds, onNoteMove, notes, connectionStartId, screenToWorld]);
 
   const handleMouseUp = useCallback((e: MouseEvent) => {
-    if (mode === 'CONNECTING' && connectionStartId && hoveredTargetId) {
-        onConnect(connectionStartId, hoveredTargetId);
+    // Logic: Connect to existing note OR Create new note on empty space
+    if (mode === 'CONNECTING' && connectionStartId) {
+        if (hoveredTargetId) {
+            onConnect(connectionStartId, hoveredTargetId);
+        } else {
+            // Dropped on empty space - Create and Connect
+            // We use mouseWorldPos which tracks the end of the line
+            onCreateAndConnect(connectionStartId, mouseWorldPos);
+        }
     }
 
     if (mode === 'SELECTING') {
@@ -257,7 +268,7 @@ export const Canvas: React.FC<CanvasProps> = ({
     setConnectionStartId(null);
     setHoveredTargetId(null);
     setIsOverDeleteZone(false);
-  }, [mode, connectionStartId, hoveredTargetId, onConnect, potentialSelectionIds, selectedNoteIds, onNoteSelect, isOverDeleteZone, onDeleteNotes]);
+  }, [mode, connectionStartId, hoveredTargetId, onConnect, onCreateAndConnect, mouseWorldPos, potentialSelectionIds, selectedNoteIds, onNoteSelect, isOverDeleteZone, onDeleteNotes]);
 
   useEffect(() => {
     window.addEventListener('mousemove', handleMouseMove);
@@ -290,7 +301,6 @@ export const Canvas: React.FC<CanvasProps> = ({
     );
   };
 
-  // Determine which notes to highlight visually
   const isNoteHighlighted = (id: string) => {
       if (mode === 'SELECTING') {
           return selectedNoteIds.includes(id) || potentialSelectionIds.includes(id);
@@ -302,7 +312,6 @@ export const Canvas: React.FC<CanvasProps> = ({
     <div 
       className="w-full h-full overflow-hidden relative cursor-default select-none dot-grid"
       style={{
-          // Move grid background logic here for infinite scroll
           backgroundPosition: `${camera.x}px ${camera.y}px`,
           backgroundSize: `${24 * camera.z}px ${24 * camera.z}px`
       }}
@@ -345,6 +354,7 @@ export const Canvas: React.FC<CanvasProps> = ({
               (() => {
                   const startNote = notes.find(n => n.id === connectionStartId);
                   if (!startNote) return null;
+                  // If we are hovering a target, snap to it, otherwise follow mouse
                   let endCenter = mouseWorldPos;
                   let endSize = undefined;
                   if (hoveredTargetId) {
@@ -386,6 +396,7 @@ export const Canvas: React.FC<CanvasProps> = ({
             onSelect={(id) => onNoteSelect([id])}
             onUpdate={onNoteUpdate}
             onMouseDown={handleNoteMouseDown}
+            onBrainstorm={onAIBrainstorm}
           />
         ))}
       </div>

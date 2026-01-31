@@ -1,5 +1,6 @@
 import React, { useRef, useEffect, useState } from 'react';
 import { NoteData } from '../types';
+import { Sparkles } from 'lucide-react';
 
 interface NoteCardProps {
   note: NoteData;
@@ -10,6 +11,7 @@ interface NoteCardProps {
   onUpdate: (id: string, data: Partial<NoteData>) => void;
   onSelect: (id: string) => void;
   onMouseDown: (e: React.MouseEvent, id: string) => void;
+  onBrainstorm?: (id: string) => void; // Optional for safety
 }
 
 export const NoteCard: React.FC<NoteCardProps> = ({
@@ -21,6 +23,7 @@ export const NoteCard: React.FC<NoteCardProps> = ({
   onUpdate,
   onSelect,
   onMouseDown,
+  onBrainstorm,
 }) => {
   const [isEditing, setIsEditing] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -65,7 +68,7 @@ export const NoteCard: React.FC<NoteCardProps> = ({
 
   return (
     <div
-      className={`absolute flex flex-col transition-transform
+      className={`absolute flex flex-col transition-transform group
         ${colorClasses[note.color]}
         /* Sketch Style Borders and Shadows */
         border-2 border-slate-700
@@ -111,6 +114,22 @@ export const NoteCard: React.FC<NoteCardProps> = ({
           </div>
         )}
       </div>
+
+      {/* Suggestion: AI Button (visible on hover or selection) */}
+      {!isDragging && !isEditing && (isSelected || true) && (
+          <div className="absolute -top-3 -right-3 opacity-0 group-hover:opacity-100 transition-opacity">
+              <button 
+                  onClick={(e) => {
+                      e.stopPropagation();
+                      if(onBrainstorm) onBrainstorm(note.id);
+                  }}
+                  className="bg-indigo-600 text-white p-1.5 rounded-full shadow-lg hover:bg-indigo-700 hover:scale-110 transition-all border-2 border-white"
+                  title="AI Brainstorm"
+              >
+                  <Sparkles size={14} />
+              </button>
+          </div>
+      )}
       
       {note.id.startsWith('ai-pending') && (
         <div className="absolute inset-0 bg-white/50 backdrop-blur-sm flex items-center justify-center z-30">

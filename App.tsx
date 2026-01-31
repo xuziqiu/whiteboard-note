@@ -6,10 +6,11 @@ import { Info, X } from 'lucide-react';
 // These imports are available via importmap in index.html
 import html2canvas from 'html2canvas';
 import jsPDF from 'jspdf';
+import { brainstormRelatedIdeas } from './services/geminiService';
 
 const INITIAL_NOTE: NoteData = {
   id: '1',
-  content: 'Double-click to create.\nRight-click drag to connect.\nLeft-click drag BG to select.',
+  content: 'Double-click to create.\nRight-click drag to connect.\nDrag connection to empty space to create new node.',
   position: { x: 100, y: 100 },
   size: { width: 280, height: 160 },
   color: 'white',
@@ -106,6 +107,116 @@ export default function App() {
     return newNote.id;
   }, []);
 
+  // New: Handle dropping a connection on empty space
+  const handleCreateAndConnect = useCallback((sourceId: string, position: Position) => {
+      // Center the new note on the cursor position
+      const centeredPos = {
+          x: position.x - 140, // half width
+          y: position.y - 70   // half height
+      };
+      createNote(centeredPos, '', sourceId);
+  }, [createNote]);
+
+  // New: AI Brainstorm Logic
+  const handleAIBrainstorm = useCallback(async (sourceId: string) => {
+      const sourceNote = notes.find(n => n.id === sourceId);
+      if (!sourceNote || !sourceNote.content.trim()) {
+          setErrorMsg("Please add some text to the note first.");
+          return;
+      }
+
+      // 1. Add visual placeholder notes
+      const placeholderIds: string[] = [];
+      const angles = [-Math.PI / 4, 0, Math.PI / 4]; // Radial spread to the right
+      const distance = 400;
+
+      const newNotesData = angles.map((angle, i) => {
+          const id = `ai-pending-${Date.now()}-${i}`;
+          placeholderIds.push(id);
+          return {
+              id,
+              content: 'Thinking...',
+              position: {
+                  x: sourceNote.position.x + distance * Math.cos(angle) + sourceNote.size.width + 50,
+                  y: sourceNote.position.y + distance * Math.sin(angle) * 1.5, // Spread out vertically more
+              },
+              size: { width: 280, height: 140 },
+              color: 'white' as const,
+              createdAt: Date.now(),
+          };
+      });
+
+      setNotes(prev => [...prev, ...newNotesData]);
+      
+      // Link them immediately
+      setConnections(prev => [
+          ...prev, 
+          ...placeholderIds.map(toId => ({
+              id: Math.random().toString(36).substr(2, 9),
+              fromId: sourceId,
+              toId
+          }))
+      ]);
+
+      try {
+          // 2. Call API
+          const ideas = await brainstormRelatedIdeas(sourceNote.content);
+          
+          // 3. Update placeholders with real content
+          setNotes(prev => prev.map(n => {
+              const index = placeholderIds.indexOf(n.id);
+              if (index !== -1 && ideas[index]) {
+                  return {
+                      ...n,
+                      id: Math.random().toString(36).substr(2, 9), // Generate real ID
+                      content: ideas[index].content,
+                      color: ['blue', 'yellow', 'green', 'purple'][Math.floor(Math.random() * 4)] as any
+                  };
+              }
+              // If API returned fewer items, keep placeholder or remove? Let's keep simpler for now.
+              if (index !== -1) {
+                   return { ...n, id: Math.random().toString(36).substr(2, 9), content: '...' };
+              }
+              return n;
+          }));
+
+          // Fix connections for the renamed IDs (this is a bit tricky with state updates, 
+          // usually better to keep IDs stable, but let's just update the ID logic above)
+          // Simplified: We actually don't need to change ID if we don't want to, 
+          // but removing 'ai-pending' prefix removes the spinner.
+          
+          setNotes(prev => prev.map(n => {
+              if (placeholderIds.includes(n.id)) {
+                   const index = placeholderIds.indexOf(n.id);
+                   return {
+                       ...n,
+                       id: n.id.replace('ai-pending-', 'note-'), // remove pending status
+                       content: ideas[index]?.content || "Could not generate idea.",
+                       color: 'yellow'
+                   }
+              }
+              return n;
+          }));
+
+          // We need to update connection IDs to match the new note IDs? 
+          // No, wait, if we change the ID in `setNotes`, the connections pointing to `ai-pending` will break.
+          // Correct approach: Update connection targets too.
+          
+          setConnections(prev => prev.map(c => {
+               if (placeholderIds.includes(c.toId)) {
+                   return { ...c, toId: c.toId.replace('ai-pending-', 'note-') };
+               }
+               return c;
+          }));
+
+      } catch (e) {
+          setErrorMsg("AI generation failed. Check API Key.");
+          // Remove placeholders on error
+          setNotes(prev => prev.filter(n => !placeholderIds.includes(n.id)));
+          setConnections(prev => prev.filter(c => !placeholderIds.includes(c.toId)));
+      }
+  }, [notes]);
+
   const handleExportMermaid = () => {
       let graph = 'graph TD\n';
       // Style class
@@ -159,8 +270,6 @@ export default function App() {
     wrapper.style.zIndex = '-9999';
     wrapper.style.overflow = 'hidden';
     wrapper.style.backgroundColor = '#f8fafc'; // Match bg color
-    // Add grid pattern to export if desired, but clean is usually better for PDF
-    // wrapper.className = 'dot-grid'; 
     
     // 4. Reset transform on the clone and shift it so content is at (padding, padding)
     clone.style.transform = `translate(${-minX + padding}px, ${-minY + padding}px) scale(1)`;
@@ -220,8 +329,10 @@ export default function App() {
           onNoteMove={handleNoteMove}
           onNoteSelect={setSelectedNoteIds}
           onConnect={handleConnect}
+          onCreateAndConnect={handleCreateAndConnect}
           onDeleteNotes={handleDeleteNotes}
           onCanvasDoubleClick={(pos) => createNote(pos)}
+          onAIBrainstorm={handleAIBrainstorm}
         />
 
         {errorMsg && (
