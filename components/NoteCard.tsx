@@ -24,6 +24,7 @@ export const NoteCard: React.FC<NoteCardProps> = ({
 }) => {
   const [isEditing, setIsEditing] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const cardRef = useRef<HTMLDivElement>(null);
 
   // Focus textarea when entering edit mode
   useEffect(() => {
@@ -36,13 +37,32 @@ export const NoteCard: React.FC<NoteCardProps> = ({
     }
   }, [isEditing]);
 
-  // Auto-resize
+  // Auto-resize textarea
   useEffect(() => {
     if (textareaRef.current) {
         textareaRef.current.style.height = 'auto';
         textareaRef.current.style.height = textareaRef.current.scrollHeight + 'px';
     }
   }, [note.content, isEditing]);
+
+  // Sync actual rendered size with state for correct arrow positioning
+  useEffect(() => {
+    const card = cardRef.current;
+    if (!card) return;
+
+    const observer = new ResizeObserver(() => {
+       const newWidth = card.offsetWidth;
+       const newHeight = card.offsetHeight;
+       
+       // Update if dimensions mismatch significantly (allow 1px tolerance)
+       if (Math.abs(newWidth - note.size.width) > 1 || Math.abs(newHeight - note.size.height) > 1) {
+           onUpdate(note.id, { size: { width: newWidth, height: newHeight } });
+       }
+    });
+    
+    observer.observe(card);
+    return () => observer.disconnect();
+  }, [note.id, note.size.width, note.size.height, onUpdate]);
 
   // Sketch-style colors
   const colorClasses: Record<NoteColor, string> = {
@@ -65,6 +85,7 @@ export const NoteCard: React.FC<NoteCardProps> = ({
 
   return (
     <div
+      ref={cardRef}
       className={`absolute flex flex-col transition-transform group
         ${colorClasses[note.color]}
         /* Sketch Style Borders and Shadows */
