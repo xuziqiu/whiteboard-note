@@ -14,7 +14,6 @@ interface CanvasProps {
   onCreateAndConnect: (sourceId: string, position: Position) => void;
   onDeleteNotes: (ids: string[]) => void;
   onCanvasDoubleClick: (pos: Position) => void;
-  onContextMenu: (e: React.MouseEvent) => void; // New Prop
   selectedNoteIds: string[];
   camera: Camera;
   setCamera: React.Dispatch<React.SetStateAction<Camera>>;
@@ -72,7 +71,6 @@ export const Canvas: React.FC<CanvasProps> = ({
   onCreateAndConnect,
   onDeleteNotes,
   onCanvasDoubleClick,
-  onContextMenu,
   selectedNoteIds,
   camera,
   setCamera,
@@ -229,11 +227,6 @@ export const Canvas: React.FC<CanvasProps> = ({
   }, [mode, dragStart, camera, selectionBox, selectedNoteIds, onNoteMove, notes, connectionStartId, screenToWorld]);
 
   const handleMouseUp = useCallback((e: MouseEvent) => {
-    // Check if it was a right-click without drag (ContextMenu)
-    if (mode === 'PANNING' && dragDistance < 5) {
-        onContextMenu(e as unknown as React.MouseEvent);
-    }
-
     if (mode === 'CONNECTING' && connectionStartId) {
         if (hoveredTargetId) {
             onConnect(connectionStartId, hoveredTargetId);
@@ -264,7 +257,7 @@ export const Canvas: React.FC<CanvasProps> = ({
     setConnectionStartId(null);
     setHoveredTargetId(null);
     setIsOverDeleteZone(false);
-  }, [mode, connectionStartId, hoveredTargetId, onConnect, onCreateAndConnect, mouseWorldPos, potentialSelectionIds, selectedNoteIds, onNoteSelect, isOverDeleteZone, onDeleteNotes, dragDistance, onContextMenu]);
+  }, [mode, connectionStartId, hoveredTargetId, onConnect, onCreateAndConnect, mouseWorldPos, potentialSelectionIds, selectedNoteIds, onNoteSelect, isOverDeleteZone, onDeleteNotes, dragDistance]);
 
   useEffect(() => {
     window.addEventListener('mousemove', handleMouseMove);

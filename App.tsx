@@ -1,8 +1,7 @@
 import React, { useState, useCallback, useEffect } from 'react';
 import { Canvas } from './components/Canvas';
 import { Sidebar } from './components/Sidebar';
-import { ContextMenu } from './components/ContextMenu';
-import { NoteData, Connection, Camera, Position, ConnectionStyle, ContextMenuState } from './types';
+import { NoteData, Connection, Camera, Position, ConnectionStyle } from './types';
 import { Info, X, ZoomIn, ZoomOut, Scan } from 'lucide-react';
 // These imports are available via importmap in index.html
 import html2canvas from 'html2canvas';
@@ -27,7 +26,6 @@ export default function App() {
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   
   const [mermaidModal, setMermaidModal] = useState<{isOpen: boolean, content: string}>({isOpen: false, content: ''});
-  const [menuState, setMenuState] = useState<ContextMenuState>({ isOpen: false, x: 0, y: 0, type: 'CANVAS' });
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -247,27 +245,6 @@ export default function App() {
       setCamera({ x: newX, y: newY, z: newZoom });
   };
 
-  const handleContextMenu = (e: React.MouseEvent) => {
-      e.preventDefault();
-      setMenuState({
-          isOpen: true,
-          x: e.clientX,
-          y: e.clientY,
-          type: 'CANVAS'
-      });
-  };
-
-  const handleMenuAction = (action: string) => {
-      if (action === 'CREATE_NOTE') {
-          // Create note at context menu location converted to world coords
-          const worldX = (menuState.x - camera.x) / camera.z;
-          const worldY = (menuState.y - camera.y) / camera.z;
-          createNote({ x: worldX, y: worldY });
-      } else if (action === 'RESET_VIEW') {
-          handleFitView();
-      }
-  };
-
   return (
     <div className="flex h-screen w-screen overflow-hidden text-slate-800 font-sans">
       <Sidebar 
@@ -292,7 +269,6 @@ export default function App() {
           onCreateAndConnect={handleCreateAndConnect}
           onDeleteNotes={handleDeleteNotes}
           onCanvasDoubleClick={(pos) => createNote(pos)}
-          onContextMenu={handleContextMenu}
         />
 
         {/* Zoom Controls */}
@@ -349,17 +325,6 @@ export default function App() {
                     </div>
                 </div>
             </div>
-        )}
-
-        {/* Context Menu */}
-        {menuState.isOpen && (
-            <ContextMenu 
-                x={menuState.x} 
-                y={menuState.y} 
-                type={menuState.type} 
-                onClose={() => setMenuState(prev => ({ ...prev, isOpen: false }))}
-                onAction={handleMenuAction}
-            />
         )}
       </main>
     </div>

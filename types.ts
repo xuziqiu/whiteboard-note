@@ -32,13 +32,6 @@ export interface Camera {
   z: number; // Zoom level
 }
 
-export interface ContextMenuState {
-  isOpen: boolean;
-  x: number;
-  y: number;
-  type: 'CANVAS';
-}
-
 export interface AIBrainstormResult {
   content: string;
 }
