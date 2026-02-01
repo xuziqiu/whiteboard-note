@@ -1,12 +1,13 @@
 import React from 'react';
 import { NoteColor } from '../types';
-import { Trash2, Sparkles } from 'lucide-react';
+import { Trash2, Sparkles, FileText } from 'lucide-react';
 
 interface ToolbarProps {
   position: { x: number; y: number };
   onColorChange: (color: NoteColor) => void;
   onDelete: () => void;
   onBrainstorm: () => void;
+  onSummarize: () => void;
   isBrainstorming: boolean;
 }
 
@@ -15,6 +16,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
   onColorChange,
   onDelete,
   onBrainstorm,
+  onSummarize,
   isBrainstorming,
 }) => {
   const colors: NoteColor[] = ['white', 'blue', 'yellow', 'green', 'red', 'purple'];
@@ -38,20 +40,34 @@ export const Toolbar: React.FC<ToolbarProps> = ({
       }}
       onMouseDown={(e) => e.stopPropagation()} // Prevent canvas drag
     >
-      {/* AI Action */}
-      <button
-        onClick={onBrainstorm}
-        disabled={isBrainstorming}
-        className={`p-2 rounded-full transition-all flex items-center gap-1.5 px-3
-            ${isBrainstorming 
-                ? 'bg-slate-100 text-slate-400 cursor-wait' 
-                : 'bg-gradient-to-r from-indigo-500 to-purple-600 text-white hover:shadow-md hover:scale-105'}
-        `}
-        title="Generate related ideas with AI"
-      >
-        <Sparkles size={16} className={isBrainstorming ? 'animate-spin' : ''} />
-        <span className="text-xs font-bold">{isBrainstorming ? 'Thinking...' : 'Brainstorm'}</span>
-      </button>
+      {/* AI Actions */}
+      <div className="flex gap-1">
+          <button
+            onClick={onBrainstorm}
+            disabled={isBrainstorming}
+            className={`p-2 rounded-full transition-all flex items-center gap-1.5 px-3
+                ${isBrainstorming 
+                    ? 'bg-slate-100 text-slate-400 cursor-wait' 
+                    : 'bg-gradient-to-r from-indigo-500 to-purple-600 text-white hover:shadow-md hover:scale-105'}
+            `}
+            title="Generate related ideas with AI"
+          >
+            <Sparkles size={16} className={isBrainstorming ? 'animate-spin' : ''} />
+            <span className="text-xs font-bold hidden sm:inline">Brainstorm</span>
+          </button>
+          
+          <button
+            onClick={onSummarize}
+            disabled={isBrainstorming}
+            className={`p-2 rounded-full transition-all flex items-center gap-1.5 px-3 hover:bg-slate-100 text-slate-700
+                ${isBrainstorming ? 'cursor-wait opacity-50' : ''}
+            `}
+            title="Summarize content"
+          >
+             <FileText size={16} />
+             <span className="text-xs font-bold hidden sm:inline">Summarize</span>
+          </button>
+      </div>
 
       <div className="w-px h-6 bg-slate-200 mx-1" />
 

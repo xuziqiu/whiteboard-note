@@ -10,33 +10,31 @@ interface CanvasProps {
   onNoteUpdate: (id: string, data: Partial<NoteData>) => void;
   onNoteSelect: (ids: string[]) => void;
   onNoteMove: (id: string, delta: Position) => void;
+  onDragEnd: () => void;
   onConnect: (sourceId: string, targetId: string) => void;
   onCreateAndConnect: (sourceId: string, position: Position) => void;
   onDeleteNotes: (ids: string[]) => void;
   onCanvasDoubleClick: (pos: Position) => void;
+  onCanvasContextMenu?: (pos: { x: number, y: number }) => void;
   
-  // New props for connection selection
   selectedNoteIds: string[];
   selectedConnectionId: string | null;
   onConnectionSelect: (id: string | null) => void;
+  onConnectionUpdate: (id: string, label: string) => void;
   
+  onInteractionStart: () => void;
+  onDrop: (e: React.DragEvent, worldPos: Position) => void;
+
   camera: Camera;
   setCamera: React.Dispatch<React.SetStateAction<Camera>>;
 }
 
-function getIntersection(
-  center: Position,
-  size: Size,
-  target: Position
-): Position {
+function getIntersection(center: Position, size: Size, target: Position): Position {
   const dx = target.x - center.x;
   const dy = target.y - center.y;
-
   if (dx === 0 && dy === 0) return center;
-
   const w = size.width / 2;
   const h = size.height / 2;
-
   if (Math.abs(dx) * h > Math.abs(dy) * w) {
     if (dx > 0) return { x: center.x + w, y: center.y + (dy / dx) * w };
     else return { x: center.x - w, y: center.y - (dy / dx) * w };
@@ -46,23 +44,43 @@ function getIntersection(
   }
 }
 
-function getPath(style: ConnectionStyle, start: Position, end: Position): string {
+function getPathData(style: ConnectionStyle, start: Position, end: Position): { d: string, mid: Position } {
   const dx = end.x - start.x;
   const dy = end.y - start.y;
+
+  let d = '';
+  let mid = { x: (start.x + end.x) / 2, y: (start.y + end.y) / 2 };
 
   switch (style) {
     case 'curve':
       if (Math.abs(dy) > Math.abs(dx)) {
-         return `M ${start.x} ${start.y} C ${start.x} ${start.y + dy/2}, ${end.x} ${end.y - dy/2}, ${end.x} ${end.y}`;
+         d = `M ${start.x} ${start.y} C ${start.x} ${start.y + dy/2}, ${end.x} ${end.y - dy/2}, ${end.x} ${end.y}`;
+         const p0 = start, p1 = {x: start.x, y: start.y + dy/2}, p2 = {x: end.x, y: end.y - dy/2}, p3 = end;
+         mid = {
+             x: 0.125*p0.x + 0.375*p1.x + 0.375*p2.x + 0.125*p3.x,
+             y: 0.125*p0.y + 0.375*p1.y + 0.375*p2.y + 0.125*p3.y
+         };
+      } else {
+         d = `M ${start.x} ${start.y} C ${start.x + dx / 2} ${start.y}, ${end.x - dx / 2} ${end.y}, ${end.x} ${end.y}`;
+         const p0 = start, p1 = {x: start.x + dx/2, y: start.y}, p2 = {x: end.x - dx/2, y: end.y}, p3 = end;
+         mid = {
+             x: 0.125*p0.x + 0.375*p1.x + 0.375*p2.x + 0.125*p3.x,
+             y: 0.125*p0.y + 0.375*p1.y + 0.375*p2.y + 0.125*p3.y
+         };
       }
-      return `M ${start.x} ${start.y} C ${start.x + dx / 2} ${start.y}, ${end.x - dx / 2} ${end.y}, ${end.x} ${end.y}`;
+      break;
     case 'step':
       const midX = start.x + dx / 2;
-      return `M ${start.x} ${start.y} L ${midX} ${start.y} L ${midX} ${end.y} L ${end.x} ${end.y}`;
+      d = `M ${start.x} ${start.y} L ${midX} ${start.y} L ${midX} ${end.y} L ${end.x} ${end.y}`;
+      mid = { x: midX, y: (start.y + end.y) / 2 };
+      break;
     case 'straight':
     default:
-      return `M ${start.x} ${start.y} L ${end.x} ${end.y}`;
+      d = `M ${start.x} ${start.y} L ${end.x} ${end.y}`;
+      mid = { x: (start.x + end.x) / 2, y: (start.y + end.y) / 2 };
+      break;
   }
+  return { d, mid };
 }
 
 type InteractionMode = 'NONE' | 'PANNING' | 'SELECTING' | 'DRAGGING_NOTES' | 'CONNECTING';
@@ -72,30 +90,41 @@ export const Canvas: React.FC<CanvasProps> = (props) => {
     notes,
     connections,
     connectionStyle,
-    onNoteUpdate,
     onNoteSelect,
     onNoteMove,
+    onDragEnd,
     onConnect,
     onCreateAndConnect,
     onDeleteNotes,
     onCanvasDoubleClick,
+    onCanvasContextMenu,
     selectedNoteIds,
     selectedConnectionId,
     onConnectionSelect,
+    onConnectionUpdate,
+    onInteractionStart,
+    onDrop,
+    onNoteUpdate,
     camera,
     setCamera,
   } = props;
 
   const containerRef = useRef<HTMLDivElement>(null);
   
-  // --- UI Render States ---
+  // Refs for Direct DOM Manipulation
+  const noteRefs = useRef<Map<string, HTMLDivElement>>(new Map());
+  const connectionRefs = useRef<Map<string, SVGPathElement>>(new Map());
+  const connectionLabelRefs = useRef<Map<string, SVGForeignObjectElement>>(new Map());
+
+  // UI Render States
   const [mode, setMode] = useState<InteractionMode>('NONE');
   const [selectionBox, setSelectionBox] = useState<{ x: number, y: number, w: number, h: number } | null>(null);
   const [mouseWorldPos, setMouseWorldPos] = useState<Position>({ x: 0, y: 0 });
   const [hoveredTargetId, setHoveredTargetId] = useState<string | null>(null);
   const [isOverDeleteZone, setIsOverDeleteZone] = useState(false);
+  const [editingConnectionId, setEditingConnectionId] = useState<string | null>(null);
 
-  // --- Logic State Ref ---
+  // Logic State Ref
   const interactionState = useRef({
       mode: 'NONE' as InteractionMode,
       dragStart: { x: 0, y: 0 },
@@ -105,6 +134,8 @@ export const Canvas: React.FC<CanvasProps> = (props) => {
       potentialSelectionIds: [] as string[],
       currentHoveredTargetId: null as string | null,
       isOverDeleteZone: false,
+      // For DOM dragging
+      dragDelta: { x: 0, y: 0 },
   });
 
   const propsRef = useRef(props);
@@ -138,15 +169,16 @@ export const Canvas: React.FC<CanvasProps> = (props) => {
     const target = e.target as HTMLElement;
     const isCanvas = target === containerRef.current || target.tagName === 'svg';
     
-    // Deselect if clicking blank canvas
+    if (editingConnectionId) setEditingConnectionId(null);
+
     if (isCanvas && isLeftClick && !e.shiftKey) {
         onNoteSelect([]);
         onConnectionSelect(null);
     }
 
-    // Update Logic Ref
     interactionState.current.dragStart = getClientCoords(e);
     interactionState.current.dragDistance = 0;
+    interactionState.current.dragDelta = { x: 0, y: 0 };
 
     if (isCanvas) {
         if (isRightClick) {
@@ -155,14 +187,8 @@ export const Canvas: React.FC<CanvasProps> = (props) => {
         } else if (isLeftClick) {
             interactionState.current.mode = 'SELECTING';
             setMode('SELECTING');
+            if (!e.shiftKey) interactionState.current.potentialSelectionIds = [];
             
-            if (!e.shiftKey) {
-                // Already cleared above, but clear potential here
-                interactionState.current.potentialSelectionIds = [];
-            } else {
-                interactionState.current.potentialSelectionIds = [];
-            }
-
             const worldPos = screenToWorld(e.clientX, e.clientY, camera);
             interactionState.current.selectionStartWorld = worldPos;
             setSelectionBox({ x: worldPos.x, y: worldPos.y, w: 0, h: 0 });
@@ -177,17 +203,22 @@ export const Canvas: React.FC<CanvasProps> = (props) => {
 
       interactionState.current.dragStart = getClientCoords(e);
       interactionState.current.dragDistance = 0;
+      interactionState.current.dragDelta = { x: 0, y: 0 };
 
       if (isRightClick) {
+          onInteractionStart(); 
           interactionState.current.mode = 'CONNECTING';
           interactionState.current.connectionStartId = id;
           setMode('CONNECTING');
-          
           const worldPos = screenToWorld(e.clientX, e.clientY, camera);
           setMouseWorldPos(worldPos);
-          onNoteSelect([id]); // Also select source note for context
+          onNoteSelect([id]); 
 
       } else if (isLeftClick) {
+          if (selectedNoteIds.includes(id) || selectedNoteIds.length === 0) {
+              onInteractionStart(); 
+          }
+
           interactionState.current.mode = 'DRAGGING_NOTES';
           setMode('DRAGGING_NOTES');
           
@@ -201,9 +232,60 @@ export const Canvas: React.FC<CanvasProps> = (props) => {
       }
   };
 
+  const updateConnectionsDom = (delta: Position) => {
+      // Re-calculate paths for all connections attached to selected notes
+      const p = propsRef.current;
+      const movedNoteIds = new Set(p.selectedNoteIds);
+      
+      p.connections.forEach(conn => {
+          const startMoved = movedNoteIds.has(conn.fromId);
+          const endMoved = movedNoteIds.has(conn.toId);
+          
+          if (!startMoved && !endMoved) return;
+
+          const startNote = p.notes.find(n => n.id === conn.fromId);
+          const endNote = p.notes.find(n => n.id === conn.toId);
+
+          if (!startNote || !endNote) return;
+
+          // Calculate "Virtual" positions based on the drag delta
+          const startX = startNote.position.x + (startMoved ? delta.x : 0);
+          const startY = startNote.position.y + (startMoved ? delta.y : 0);
+          const endX = endNote.position.x + (endMoved ? delta.x : 0);
+          const endY = endNote.position.y + (endMoved ? delta.y : 0);
+
+          const startCenter = { x: startX + startNote.size.width / 2, y: startY + startNote.size.height / 2 };
+          const endCenter = { x: endX + endNote.size.width / 2, y: endY + endNote.size.height / 2 };
+
+          const startPoint = getIntersection(startCenter, startNote.size, endCenter);
+          const endPoint = getIntersection(endCenter, endNote.size, startCenter);
+          
+          const { d, mid } = getPathData(p.connectionStyle, startPoint, endPoint);
+
+          // Direct DOM Update for Paths
+          const pathEl = connectionRefs.current.get(conn.id);
+          const bgPathEl = connectionRefs.current.get(conn.id + '-bg');
+          if (pathEl) pathEl.setAttribute('d', d);
+          if (bgPathEl) bgPathEl.setAttribute('d', d);
+
+          // Direct DOM Update for Labels
+          const labelEl = connectionLabelRefs.current.get(conn.id);
+          if (labelEl) {
+              labelEl.setAttribute('x', String(mid.x - 60));
+              labelEl.setAttribute('y', String(mid.y - 15));
+          }
+      });
+  };
+
   const handleMouseUp = useCallback((e: MouseEvent) => {
     const state = interactionState.current;
     const p = propsRef.current;
+
+    if (state.mode === 'PANNING') {
+        if (state.dragDistance < 5) {
+             p.onCanvasContextMenu?.({ x: e.clientX, y: e.clientY });
+        }
+    }
 
     if (state.mode === 'CONNECTING' && state.connectionStartId) {
         if (state.currentHoveredTargetId) {
@@ -226,8 +308,23 @@ export const Canvas: React.FC<CanvasProps> = (props) => {
         }
     }
 
-    if (state.mode === 'DRAGGING_NOTES' && state.isOverDeleteZone) {
-        p.onDeleteNotes(p.selectedNoteIds);
+    if (state.mode === 'DRAGGING_NOTES') {
+        if (state.isOverDeleteZone) {
+            p.onDeleteNotes(p.selectedNoteIds);
+        } else {
+            // Commit the visual move to React State
+            if (p.selectedNoteIds.length > 0 && (state.dragDelta.x !== 0 || state.dragDelta.y !== 0)) {
+                p.onNoteMove(p.selectedNoteIds[0], state.dragDelta);
+                
+                // Reset Transforms immediately to let React re-render take over at the new position
+                // This prevents "jumping" when the state update comes through
+                p.selectedNoteIds.forEach(id => {
+                    const el = noteRefs.current.get(id);
+                    if (el) el.style.transform = '';
+                });
+            }
+        }
+        p.onDragEnd();
     }
 
     state.mode = 'NONE';
@@ -235,6 +332,7 @@ export const Canvas: React.FC<CanvasProps> = (props) => {
     state.currentHoveredTargetId = null;
     state.potentialSelectionIds = [];
     state.isOverDeleteZone = false;
+    state.dragDelta = { x: 0, y: 0 };
     
     setMode('NONE');
     setSelectionBox(null);
@@ -267,7 +365,6 @@ export const Canvas: React.FC<CanvasProps> = (props) => {
         const start = state.selectionStartWorld;
         const newW = worldPos.x - start.x;
         const newH = worldPos.y - start.y;
-        
         setSelectionBox({ x: start.x, y: start.y, w: newW, h: newH });
 
         const x = newW < 0 ? start.x + newW : start.x;
@@ -285,16 +382,24 @@ export const Canvas: React.FC<CanvasProps> = (props) => {
         state.potentialSelectionIds = hitNotes;
     }
     else if (state.mode === 'DRAGGING_NOTES') {
-        const delta = { 
-            x: (current.x - state.dragStart.x) / p.camera.z, 
-            y: (current.y - state.dragStart.y) / p.camera.z 
-        };
+        // Calculate Delta (Raw World Units)
+        const dx = (current.x - state.dragStart.x) / p.camera.z;
+        const dy = (current.y - state.dragStart.y) / p.camera.z;
+        state.dragDelta = { x: dx, y: dy };
         
-        if (p.selectedNoteIds.length > 0) {
-            p.onNoteMove(p.selectedNoteIds[0], delta);
-        }
-        state.dragStart = current;
+        // --- DIRECT DOM MANIPULATION (Zero Latency) ---
+        p.selectedNoteIds.forEach(id => {
+            const el = noteRefs.current.get(id);
+            if (el) {
+                // Using translate3d for GPU acceleration
+                el.style.transform = `translate3d(${dx}px, ${dy}px, 0)`;
+            }
+        });
         
+        // Update Lines Manually
+        updateConnectionsDom({ x: dx, y: dy });
+
+        // Check Delete Zone
         const deleteZoneSize = 200;
         const distToCorner = Math.sqrt(
             Math.pow(window.innerWidth - e.clientX, 2) + 
@@ -347,52 +452,122 @@ export const Canvas: React.FC<CanvasProps> = (props) => {
     };
   }, [handleMouseMove, handleMouseUp]);
 
-  const tempConnectionStartId = interactionState.current.connectionStartId;
+  const handleDragOver = (e: React.DragEvent) => {
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'copy';
+  };
 
-  const renderConnection = (id: string, startNote: NoteData, endCenter: Position, endSize?: Size) => {
+  const handleDrop = (e: React.DragEvent) => {
+      e.preventDefault();
+      const worldPos = screenToWorld(e.clientX, e.clientY, camera);
+      onDrop(e, worldPos);
+  };
+
+  const renderConnection = (conn: Connection) => {
+    const startNote = notes.find(n => n.id === conn.fromId);
+    const endNote = notes.find(n => n.id === conn.toId);
+    if (!startNote || !endNote) return null;
+
     const startCenter = {
       x: startNote.position.x + startNote.size.width / 2,
       y: startNote.position.y + startNote.size.height / 2,
     };
+    const endCenter = {
+        x: endNote.position.x + endNote.size.width / 2,
+        y: endNote.position.y + endNote.size.height / 2,
+    };
+
     const startPoint = getIntersection(startCenter, startNote.size, endCenter);
-    const endPoint = endSize ? getIntersection(endCenter, endSize, startCenter) : endCenter;
-    const d = getPath(connectionStyle, startPoint, endPoint);
-    const isSelected = selectedConnectionId === id;
+    const endPoint = getIntersection(endCenter, endNote.size, startCenter);
+    
+    const { d, mid } = getPathData(connectionStyle, startPoint, endPoint);
+    const isSelected = selectedConnectionId === conn.id;
+
+    const handleLabelDoubleClick = (e: React.MouseEvent) => {
+        e.stopPropagation();
+        onInteractionStart();
+        setEditingConnectionId(conn.id);
+    };
+
+    const handleLabelChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+        onConnectionUpdate(conn.id, e.target.value);
+    };
 
     return (
-      <g 
-        key={id} 
-        onClick={(e) => {
-            e.stopPropagation();
-            onConnectionSelect(id);
-            onNoteSelect([]); // Deselect notes when clicking connection
-        }}
-        className="cursor-pointer group"
-      >
-        {/* Invisible thick hit area */}
-        <path
-            d={d}
-            stroke="transparent"
-            strokeWidth="20"
-            fill="none"
-        />
-        {/* Visible Line */}
-        <path
-            d={d}
-            stroke={isSelected ? "#6366f1" : "#334155"}
-            strokeWidth={isSelected ? "4" : "3"}
-            strokeLinecap="round"
-            fill="none"
-            markerEnd={isSelected ? "url(#arrow-selected)" : "url(#arrow)"}
-            className="transition-colors duration-200 group-hover:stroke-indigo-400"
-        />
-      </g>
+      <React.Fragment key={conn.id}>
+        <g 
+            onClick={(e) => {
+                e.stopPropagation();
+                onConnectionSelect(conn.id);
+                onNoteSelect([]);
+            }}
+            onDoubleClick={handleLabelDoubleClick}
+            className="cursor-pointer group"
+        >
+            <path 
+                ref={el => { if(el) connectionRefs.current.set(conn.id + '-bg', el); }}
+                d={d} stroke="transparent" strokeWidth="20" fill="none" 
+            />
+            <path
+                ref={el => { if(el) connectionRefs.current.set(conn.id, el); }}
+                d={d}
+                stroke={isSelected ? "#6366f1" : "#334155"}
+                strokeWidth={isSelected ? "4" : "3"}
+                strokeLinecap="round"
+                fill="none"
+                markerEnd={isSelected ? "url(#arrow-selected)" : "url(#arrow)"}
+                className="transition-colors duration-200 group-hover:stroke-indigo-400"
+            />
+        </g>
+        
+        {(conn.label || isSelected || editingConnectionId === conn.id) && (
+            <foreignObject 
+                ref={el => { if(el) connectionLabelRefs.current.set(conn.id, el); }}
+                x={mid.x - 60} 
+                y={mid.y - 15} 
+                width={120} 
+                height={30} 
+                className="overflow-visible pointer-events-none"
+            >
+                <div className="flex justify-center items-center w-full h-full pointer-events-auto">
+                    {editingConnectionId === conn.id ? (
+                        <input
+                            autoFocus
+                            value={conn.label || ''}
+                            onChange={handleLabelChange}
+                            onBlur={() => setEditingConnectionId(null)}
+                            onKeyDown={(e) => e.key === 'Enter' && setEditingConnectionId(null)}
+                            className="bg-white border-2 border-indigo-500 rounded px-2 py-0.5 text-xs text-center shadow-md outline-none min-w-[60px]"
+                            placeholder="Label..."
+                        />
+                    ) : (
+                        (conn.label || isSelected) && (
+                            <div 
+                                onDoubleClick={handleLabelDoubleClick}
+                                onClick={(e) => {
+                                    e.stopPropagation();
+                                    onConnectionSelect(conn.id);
+                                }}
+                                className={`
+                                    px-2 py-0.5 rounded-full text-[10px] font-bold border transition-all cursor-pointer select-none
+                                    ${isSelected 
+                                        ? 'bg-indigo-50 border-indigo-200 text-indigo-700 shadow-sm' 
+                                        : (conn.label ? 'bg-white border-slate-200 text-slate-500 shadow-sm hover:border-indigo-300' : 'opacity-0 group-hover:opacity-100 bg-slate-100 border-slate-200 text-slate-400')
+                                    }
+                                `}
+                            >
+                                {conn.label || '+'}
+                            </div>
+                        )
+                    )}
+                </div>
+            </foreignObject>
+        )}
+      </React.Fragment>
     );
   };
 
-  const isNoteHighlighted = (id: string) => {
-      return selectedNoteIds.includes(id);
-  };
+  const tempConnectionStartId = interactionState.current.connectionStartId;
 
   return (
     <div 
@@ -409,6 +584,8 @@ export const Canvas: React.FC<CanvasProps> = (props) => {
           }
       }}
       onContextMenu={(e) => e.preventDefault()}
+      onDragOver={handleDragOver}
+      onDrop={handleDrop}
     >
       <div 
         ref={containerRef}
@@ -428,16 +605,7 @@ export const Canvas: React.FC<CanvasProps> = (props) => {
             </marker>
           </defs>
 
-          {connections.map(conn => {
-            const startNote = notes.find(n => n.id === conn.fromId);
-            const endNote = notes.find(n => n.id === conn.toId);
-            if (!startNote || !endNote) return null;
-             const endCenter = {
-                x: endNote.position.x + endNote.size.width / 2,
-                y: endNote.position.y + endNote.size.height / 2,
-             };
-             return renderConnection(conn.id, startNote, endCenter, endNote.size);
-          })}
+          {connections.map(renderConnection)}
 
           {mode === 'CONNECTING' && tempConnectionStartId && (
               (() => {
@@ -456,11 +624,10 @@ export const Canvas: React.FC<CanvasProps> = (props) => {
                       }
                   }
                   
-                  // Render temp connection manually since it's not in state
                   const startCenter = { x: startNote.position.x + startNote.size.width/2, y: startNote.position.y + startNote.size.height/2 };
                   const startPoint = getIntersection(startCenter, startNote.size, endCenter);
                   const endPoint = endSize ? getIntersection(endCenter, endSize, startCenter) : endCenter;
-                  const d = getPath(connectionStyle, startPoint, endPoint);
+                  const { d } = getPathData(connectionStyle, startPoint, endPoint);
 
                   return (
                       <path
@@ -477,13 +644,12 @@ export const Canvas: React.FC<CanvasProps> = (props) => {
           )}
         </svg>
         
-        {/* Ghost Note Preview when dragging connection to empty space */}
         {mode === 'CONNECTING' && !hoveredTargetId && (
             <div
                 className="absolute border-2 border-dashed border-slate-300 bg-white/50 rounded-sm pointer-events-none flex items-center justify-center"
                 style={{
-                    left: mouseWorldPos.x - 140, // Centered (default width 280 / 2)
-                    top: mouseWorldPos.y - 70,   // Centered (default height 140 / 2)
+                    left: mouseWorldPos.x - 140, 
+                    top: mouseWorldPos.y - 70,   
                     width: 280,
                     height: 140,
                 }}
@@ -492,7 +658,6 @@ export const Canvas: React.FC<CanvasProps> = (props) => {
             </div>
         )}
 
-        {/* Selection Box */}
         {mode === 'SELECTING' && selectionBox && (
             <div 
                 className="absolute bg-blue-500/10 border border-blue-500/50 rounded-sm z-50 pointer-events-none"
@@ -508,20 +673,19 @@ export const Canvas: React.FC<CanvasProps> = (props) => {
         {notes.map(note => (
           <NoteCard
             key={note.id}
+            ref={el => { if(el) noteRefs.current.set(note.id, el); }}
             note={note}
             scale={camera.z}
-            isSelected={isNoteHighlighted(note.id)}
+            isSelected={selectedNoteIds.includes(note.id)}
             isDragging={mode === 'DRAGGING_NOTES' && selectedNoteIds.includes(note.id)}
             isTarget={hoveredTargetId === note.id}
             onSelect={(id) => {
-                // If not already selected and shift not held, clear others. 
-                // But this logic is handled in handleNoteMouseDown basically.
-                // onSelect just informs parent.
                 onNoteSelect([id]); 
                 onConnectionSelect(null);
             }}
             onUpdate={onNoteUpdate}
             onMouseDown={handleNoteMouseDown}
+            onInteractionStart={onInteractionStart}
           />
         ))}
       </div>

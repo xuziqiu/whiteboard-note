@@ -10,9 +10,11 @@ export interface Size {
 
 export type NoteColor = 'white' | 'blue' | 'yellow' | 'green' | 'red' | 'purple';
 export type ConnectionStyle = 'straight' | 'curve' | 'step';
+export type NoteType = 'text' | 'logic_and' | 'logic_or' | 'logic_not' | 'logic_decision';
 
 export interface NoteData {
   id: string;
+  type?: NoteType; // Defaults to 'text' if undefined
   content: string;
   position: Position;
   size: Size;
@@ -24,6 +26,7 @@ export interface Connection {
   id: string;
   fromId: string;
   toId: string;
+  label?: string;
 }
 
 export interface Camera {
