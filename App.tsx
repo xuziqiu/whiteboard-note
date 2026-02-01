@@ -1,15 +1,17 @@
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState, useCallback, useEffect, useMemo } from 'react';
 import { Canvas } from './components/Canvas';
 import { Sidebar } from './components/Sidebar';
-import { NoteData, Connection, Camera, Position, ConnectionStyle } from './types';
+import { Toolbar } from './components/Toolbar';
+import { NoteData, Connection, Camera, Position, ConnectionStyle, NoteColor } from './types';
 import { Info, X, ZoomIn, ZoomOut, Scan } from 'lucide-react';
 // These imports are available via importmap in index.html
 import html2canvas from 'html2canvas';
 import jsPDF from 'jspdf';
+import { brainstormRelatedIdeas } from './services/geminiService';
 
 const INITIAL_NOTE: NoteData = {
   id: '1',
-  content: 'Double-click to create.\nRight-click drag to connect.\nDrag connection to empty space to create new node.',
+  content: 'Double-click to create.\n- Right-click drag to connect.\n- Select a card to use AI.\n- Drag connection to empty space to create new node.',
   position: { x: 100, y: 100 },
   size: { width: 280, height: 160 },
   color: 'white',
@@ -22,23 +24,31 @@ export default function App() {
   const [camera, setCamera] = useState<Camera>({ x: 0, y: 0, z: 1 });
   
   const [selectedNoteIds, setSelectedNoteIds] = useState<string[]>([]);
+  const [selectedConnectionId, setSelectedConnectionId] = useState<string | null>(null);
+  
   const [connectionStyle, setConnectionStyle] = useState<ConnectionStyle>('curve');
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [isBrainstorming, setIsBrainstorming] = useState(false);
   
   const [mermaidModal, setMermaidModal] = useState<{isOpen: boolean, content: string}>({isOpen: false, content: ''});
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if ((e.key === 'Delete' || e.key === 'Backspace') && selectedNoteIds.length > 0) {
-        const activeTag = document.activeElement?.tagName;
-        if (activeTag !== 'TEXTAREA' && activeTag !== 'INPUT') {
-            handleDeleteNotes(selectedNoteIds);
-        }
+      const activeTag = document.activeElement?.tagName;
+      if (activeTag === 'TEXTAREA' || activeTag === 'INPUT') return;
+
+      if (e.key === 'Delete' || e.key === 'Backspace') {
+          if (selectedNoteIds.length > 0) {
+              handleDeleteNotes(selectedNoteIds);
+          } else if (selectedConnectionId) {
+              setConnections(prev => prev.filter(c => c.id !== selectedConnectionId));
+              setSelectedConnectionId(null);
+          }
       }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [selectedNoteIds]);
+  }, [selectedNoteIds, selectedConnectionId]);
 
   const handleNoteUpdate = useCallback((id: string, data: Partial<NoteData>) => {
     setNotes(prev => prev.map(n => n.id === id ? { ...n, ...data } : n));
@@ -107,7 +117,6 @@ export default function App() {
   }, []);
 
   const handleCreateAndConnect = useCallback((sourceId: string, position: Position) => {
-      // Center the new note on the cursor position
       const centeredPos = {
           x: position.x - 140, // half width
           y: position.y - 70   // half height
@@ -115,13 +124,71 @@ export default function App() {
       createNote(centeredPos, '', sourceId);
   }, [createNote]);
 
+  const handleColorChange = (color: NoteColor) => {
+      setNotes(prev => prev.map(n => selectedNoteIds.includes(n.id) ? { ...n, color } : n));
+  };
+
+  const handleBrainstorm = async () => {
+      if (selectedNoteIds.length !== 1) return;
+      
+      const sourceNote = notes.find(n => n.id === selectedNoteIds[0]);
+      if (!sourceNote) return;
+
+      setIsBrainstorming(true);
+      try {
+          const results = await brainstormRelatedIdeas(sourceNote.content);
+          
+          if (results.length > 0) {
+              const startX = sourceNote.position.x + sourceNote.size.width + 100;
+              const startY = sourceNote.position.y;
+              const spacingY = 180;
+              const totalHeight = (results.length - 1) * spacingY;
+              
+              results.forEach((idea, index) => {
+                  const newPos = {
+                      x: startX,
+                      y: startY - (totalHeight / 2) + (index * spacingY)
+                  };
+                  createNote(newPos, idea.content, sourceNote.id);
+              });
+          }
+      } catch (e) {
+          console.error(e);
+          setErrorMsg("Failed to generate ideas. Check your API Key.");
+          setTimeout(() => setErrorMsg(null), 3000);
+      } finally {
+          setIsBrainstorming(false);
+      }
+  };
+
+  // Calculate toolbar position
+  const toolbarPosition = useMemo(() => {
+      if (selectedNoteIds.length === 0) return null;
+      
+      const selectedNotes = notes.filter(n => selectedNoteIds.includes(n.id));
+      if (selectedNotes.length === 0) return null;
+
+      let minX = Infinity, minY = Infinity, maxX = -Infinity;
+      selectedNotes.forEach(n => {
+          minX = Math.min(minX, n.position.x);
+          minY = Math.min(minY, n.position.y);
+          maxX = Math.max(maxX, n.position.x + n.size.width);
+      });
+
+      const centerX = (minX + maxX) / 2;
+      
+      // Convert world coordinates to screen coordinates
+      const screenX = centerX * camera.z + camera.x;
+      const screenY = minY * camera.z + camera.y;
+
+      return { x: screenX, y: screenY };
+  }, [selectedNoteIds, notes, camera]);
+
   const handleExportMermaid = () => {
       let graph = 'graph TD\n';
-      // Style class
       graph += '  classDef default fill:#fff,stroke:#333,stroke-width:2px;\n';
       
       notes.forEach(n => {
-          // Sanitize content for mermaid label
           const label = n.content.replace(/["\n]/g, ' ').substring(0, 50) + (n.content.length > 50 ? '...' : '');
           graph += `  ${n.id}["${label || 'Empty Note'}"]\n`;
       });
@@ -135,8 +202,6 @@ export default function App() {
 
   const handleExportPDF = async () => {
     if (notes.length === 0) return;
-
-    // 1. Calculate the bounding box of the content
     let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
     notes.forEach(n => {
         minX = Math.min(minX, n.position.x);
@@ -146,30 +211,25 @@ export default function App() {
     });
     
     const padding = 50;
-    // Ensure we don't crash on empty canvas
     if (minX === Infinity) { minX=0; minY=0; maxX=100; maxY=100; }
 
     const width = maxX - minX + (padding * 2);
     const height = maxY - minY + (padding * 2);
 
-    // 2. Clone the content element
     const source = document.getElementById('canvas-content');
     if (!source) return;
 
     const clone = source.cloneNode(true) as HTMLElement;
-    
-    // 3. Create a wrapper to hold the clone off-screen
     const wrapper = document.createElement('div');
     wrapper.style.position = 'fixed';
     wrapper.style.top = '0';
-    wrapper.style.left = '0'; // Keep it visible for html2canvas to capture properly
+    wrapper.style.left = '0'; 
     wrapper.style.width = `${width}px`;
     wrapper.style.height = `${height}px`;
     wrapper.style.zIndex = '-9999';
     wrapper.style.overflow = 'hidden';
-    wrapper.style.backgroundColor = '#f8fafc'; // Match bg color
+    wrapper.style.backgroundColor = '#f8fafc'; 
     
-    // 4. Reset transform on the clone and shift it so content is at (padding, padding)
     clone.style.transform = `translate(${-minX + padding}px, ${-minY + padding}px) scale(1)`;
     clone.style.position = 'absolute';
     clone.style.left = '0';
@@ -233,9 +293,8 @@ export default function App() {
       
       const scaleX = window.innerWidth / contentW;
       const scaleY = window.innerHeight / contentH;
-      const newZoom = Math.min(Math.min(scaleX, scaleY), 1); // Don't zoom in too much if content is small
+      const newZoom = Math.min(Math.min(scaleX, scaleY), 1); 
 
-      // Center it
       const centerX = (minX + maxX) / 2;
       const centerY = (minY + maxY) / 2;
       
@@ -262,6 +321,8 @@ export default function App() {
           camera={camera}
           setCamera={setCamera}
           selectedNoteIds={selectedNoteIds}
+          selectedConnectionId={selectedConnectionId}
+          onConnectionSelect={setSelectedConnectionId}
           onNoteUpdate={handleNoteUpdate}
           onNoteMove={handleNoteMove}
           onNoteSelect={setSelectedNoteIds}
@@ -271,7 +332,16 @@ export default function App() {
           onCanvasDoubleClick={(pos) => createNote(pos)}
         />
 
-        {/* Zoom Controls */}
+        {toolbarPosition && (
+            <Toolbar 
+                position={toolbarPosition}
+                onColorChange={handleColorChange}
+                onDelete={() => handleDeleteNotes(selectedNoteIds)}
+                onBrainstorm={handleBrainstorm}
+                isBrainstorming={isBrainstorming}
+            />
+        )}
+
         <div className="fixed bottom-6 left-6 flex gap-2 z-50 no-print">
             <div className="bg-white p-1 rounded-md shadow-md border-2 border-slate-200 flex items-center gap-1">
                 <button onClick={() => handleZoom(-0.1)} className="p-2 hover:bg-slate-100 rounded text-slate-600" title="Zoom Out"><ZoomOut size={20}/></button>
@@ -284,14 +354,13 @@ export default function App() {
         </div>
 
         {errorMsg && (
-            <div className="absolute bottom-10 left-1/2 transform -translate-x-1/2 bg-red-50 text-red-600 border border-red-200 px-4 py-2 rounded-lg shadow-lg z-50 flex items-center gap-2 text-sm font-bold">
+            <div className="absolute bottom-10 left-1/2 transform -translate-x-1/2 bg-red-50 text-red-600 border border-red-200 px-4 py-2 rounded-lg shadow-lg z-50 flex items-center gap-2 text-sm font-bold animate-in fade-in slide-in-from-bottom-5">
                 <Info size={16} />
                 <span>{errorMsg}</span>
                 <button onClick={() => setErrorMsg(null)} className="ml-2 hover:bg-red-100 rounded-full p-1"><X size={12}/></button>
             </div>
         )}
 
-        {/* Mermaid Modal */}
         {mermaidModal.isOpen && (
             <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-[100] flex items-center justify-center p-4">
                 <div className="bg-white rounded-lg shadow-2xl w-full max-w-2xl border-2 border-slate-800 flex flex-col max-h-[80vh]">

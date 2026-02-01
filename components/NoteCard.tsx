@@ -1,5 +1,6 @@
 import React, { useRef, useEffect, useState } from 'react';
 import { NoteColor, NoteData } from '../types';
+import { ArrowDownRight } from 'lucide-react';
 
 interface NoteCardProps {
   note: NoteData;
@@ -25,6 +26,7 @@ export const NoteCard: React.FC<NoteCardProps> = ({
   const [isEditing, setIsEditing] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const cardRef = useRef<HTMLDivElement>(null);
+  const [isResizing, setIsResizing] = useState(false);
 
   // Focus textarea when entering edit mode
   useEffect(() => {
@@ -37,13 +39,13 @@ export const NoteCard: React.FC<NoteCardProps> = ({
     }
   }, [isEditing]);
 
-  // Auto-resize textarea
+  // Auto-resize textarea height
   useEffect(() => {
     if (textareaRef.current) {
         textareaRef.current.style.height = 'auto';
         textareaRef.current.style.height = textareaRef.current.scrollHeight + 'px';
     }
-  }, [note.content, isEditing]);
+  }, [note.content, isEditing, note.size.width]); // Also re-calc when width changes
 
   // Sync actual rendered size with state for correct arrow positioning
   useEffect(() => {
@@ -54,8 +56,9 @@ export const NoteCard: React.FC<NoteCardProps> = ({
        const newWidth = card.offsetWidth;
        const newHeight = card.offsetHeight;
        
-       // Update if dimensions mismatch significantly (allow 1px tolerance)
+       // Update if dimensions mismatch significantly
        if (Math.abs(newWidth - note.size.width) > 1 || Math.abs(newHeight - note.size.height) > 1) {
+           // We only push height updates from observer, width is controlled by state/resize
            onUpdate(note.id, { size: { width: newWidth, height: newHeight } });
        }
     });
@@ -63,6 +66,31 @@ export const NoteCard: React.FC<NoteCardProps> = ({
     observer.observe(card);
     return () => observer.disconnect();
   }, [note.id, note.size.width, note.size.height, onUpdate]);
+
+  // Handle Resizing
+  const handleResizeStart = (e: React.MouseEvent) => {
+      e.stopPropagation();
+      e.preventDefault();
+      setIsResizing(true);
+
+      const startX = e.clientX;
+      const startWidth = note.size.width;
+
+      const handleMouseMove = (moveEvent: MouseEvent) => {
+          const deltaX = (moveEvent.clientX - startX) / scale;
+          const newWidth = Math.max(200, startWidth + deltaX); // Min width 200px
+          onUpdate(note.id, { size: { ...note.size, width: newWidth } });
+      };
+
+      const handleMouseUp = () => {
+          setIsResizing(false);
+          window.removeEventListener('mousemove', handleMouseMove);
+          window.removeEventListener('mouseup', handleMouseUp);
+      };
+
+      window.addEventListener('mousemove', handleMouseMove);
+      window.addEventListener('mouseup', handleMouseUp);
+  };
 
   // Sketch-style colors
   const colorClasses: Record<NoteColor, string> = {
@@ -105,7 +133,7 @@ export const NoteCard: React.FC<NoteCardProps> = ({
         borderRadius: '2px',
       }}
       onMouseDown={(e) => {
-        if (!isEditing) {
+        if (!isEditing && !isResizing) {
              onMouseDown(e, note.id);
         }
       }}
@@ -114,6 +142,7 @@ export const NoteCard: React.FC<NoteCardProps> = ({
           e.preventDefault();
           e.stopPropagation();
       }}
+      onDragStart={(e) => e.preventDefault()}
     >
       <div className="flex-1 p-4 flex flex-col justify-center min-h-[60px]">
         {isEditing ? (
@@ -132,10 +161,31 @@ export const NoteCard: React.FC<NoteCardProps> = ({
             className="whitespace-pre-wrap text-lg leading-snug pointer-events-none select-none empty:text-slate-400 empty:after:content-['Empty_card']"
             style={{ fontFamily: '"Patrick Hand", cursive' }}
           >
-            {note.content}
+            {note.content.split('\n').map((line, i) => {
+                const trimmed = line.trim();
+                if (trimmed.startsWith('- ') || trimmed.startsWith('* ')) {
+                    return (
+                        <div key={i} className="flex pl-1">
+                            <span className="mr-2 text-slate-500">•</span>
+                            <span>{line.replace(/^(\s*)[-*]\s+/, '$1')}</span>
+                        </div>
+                    );
+                }
+                return <div key={i} className="min-h-[1.2em]">{line}</div>;
+            })}
           </div>
         )}
       </div>
+
+      {/* Resize Handle */}
+      {!isEditing && (isSelected || isResizing) && (
+          <div 
+            className="absolute bottom-0 right-0 p-1 cursor-nwse-resize opacity-0 group-hover:opacity-100 transition-opacity text-slate-400 hover:text-slate-600"
+            onMouseDown={handleResizeStart}
+          >
+              <ArrowDownRight size={16} />
+          </div>
+      )}
     </div>
   );
 };

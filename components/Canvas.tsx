@@ -14,7 +14,12 @@ interface CanvasProps {
   onCreateAndConnect: (sourceId: string, position: Position) => void;
   onDeleteNotes: (ids: string[]) => void;
   onCanvasDoubleClick: (pos: Position) => void;
+  
+  // New props for connection selection
   selectedNoteIds: string[];
+  selectedConnectionId: string | null;
+  onConnectionSelect: (id: string | null) => void;
+  
   camera: Camera;
   setCamera: React.Dispatch<React.SetStateAction<Camera>>;
 }
@@ -75,6 +80,8 @@ export const Canvas: React.FC<CanvasProps> = (props) => {
     onDeleteNotes,
     onCanvasDoubleClick,
     selectedNoteIds,
+    selectedConnectionId,
+    onConnectionSelect,
     camera,
     setCamera,
   } = props;
@@ -82,7 +89,6 @@ export const Canvas: React.FC<CanvasProps> = (props) => {
   const containerRef = useRef<HTMLDivElement>(null);
   
   // --- UI Render States ---
-  // These are only for triggering renders or visual feedback
   const [mode, setMode] = useState<InteractionMode>('NONE');
   const [selectionBox, setSelectionBox] = useState<{ x: number, y: number, w: number, h: number } | null>(null);
   const [mouseWorldPos, setMouseWorldPos] = useState<Position>({ x: 0, y: 0 });
@@ -90,19 +96,17 @@ export const Canvas: React.FC<CanvasProps> = (props) => {
   const [isOverDeleteZone, setIsOverDeleteZone] = useState(false);
 
   // --- Logic State Ref ---
-  // These track the actual interaction logic to avoid closure staleness
   const interactionState = useRef({
       mode: 'NONE' as InteractionMode,
-      dragStart: { x: 0, y: 0 }, // Screen coords
+      dragStart: { x: 0, y: 0 },
       dragDistance: 0,
       connectionStartId: null as string | null,
       selectionStartWorld: { x: 0, y: 0 },
       potentialSelectionIds: [] as string[],
-      currentHoveredTargetId: null as string | null, // Sync with state for logic access
+      currentHoveredTargetId: null as string | null,
       isOverDeleteZone: false,
   });
 
-  // Keep props fresh in ref for event handlers
   const propsRef = useRef(props);
   propsRef.current = props;
 
@@ -111,9 +115,6 @@ export const Canvas: React.FC<CanvasProps> = (props) => {
     y: e.clientY,
   });
 
-  // Helper inside component to access latest camera from propsRef if needed, 
-  // but for screenToWorld we usually need the camera at the START of the drag or current?
-  // Current camera is best.
   const screenToWorld = useCallback((screenX: number, screenY: number, currentCamera: Camera) => {
     return {
       x: (screenX - currentCamera.x) / currentCamera.z,
@@ -137,6 +138,12 @@ export const Canvas: React.FC<CanvasProps> = (props) => {
     const target = e.target as HTMLElement;
     const isCanvas = target === containerRef.current || target.tagName === 'svg';
     
+    // Deselect if clicking blank canvas
+    if (isCanvas && isLeftClick && !e.shiftKey) {
+        onNoteSelect([]);
+        onConnectionSelect(null);
+    }
+
     // Update Logic Ref
     interactionState.current.dragStart = getClientCoords(e);
     interactionState.current.dragDistance = 0;
@@ -150,10 +157,9 @@ export const Canvas: React.FC<CanvasProps> = (props) => {
             setMode('SELECTING');
             
             if (!e.shiftKey) {
-                onNoteSelect([]);
+                // Already cleared above, but clear potential here
                 interactionState.current.potentialSelectionIds = [];
             } else {
-                // If shift key, we keep current selection, but potential is empty initially
                 interactionState.current.potentialSelectionIds = [];
             }
 
@@ -179,6 +185,7 @@ export const Canvas: React.FC<CanvasProps> = (props) => {
           
           const worldPos = screenToWorld(e.clientX, e.clientY, camera);
           setMouseWorldPos(worldPos);
+          onNoteSelect([id]); // Also select source note for context
 
       } else if (isLeftClick) {
           interactionState.current.mode = 'DRAGGING_NOTES';
@@ -194,94 +201,6 @@ export const Canvas: React.FC<CanvasProps> = (props) => {
       }
   };
 
-  const handleMouseMove = useCallback((e: MouseEvent) => {
-    const state = interactionState.current;
-    if (state.mode === 'NONE') return;
-
-    const p = propsRef.current;
-    const current = getClientCoords(e);
-    
-    // Calc distance
-    const dist = Math.sqrt(Math.pow(current.x - state.dragStart.x, 2) + Math.pow(current.y - state.dragStart.y, 2));
-    state.dragDistance = Math.max(state.dragDistance, dist);
-
-    const worldPos = screenToWorld(e.clientX, e.clientY, p.camera);
-
-    if (state.mode === 'PANNING') {
-        const delta = { x: current.x - state.dragStart.x, y: current.y - state.dragStart.y };
-        p.setCamera(prev => ({ ...prev, x: prev.x + delta.x, y: prev.y + delta.y }));
-        state.dragStart = current;
-    } 
-    else if (state.mode === 'SELECTING') {
-        const start = state.selectionStartWorld;
-        const newW = worldPos.x - start.x;
-        const newH = worldPos.y - start.y;
-        
-        // Update UI
-        setSelectionBox({ x: start.x, y: start.y, w: newW, h: newH });
-
-        // Logic
-        const x = newW < 0 ? start.x + newW : start.x;
-        const y = newH < 0 ? start.y + newH : start.y;
-        const w = Math.abs(newW);
-        const h = Math.abs(newH);
-        
-        const hitNotes = p.notes.filter(n => 
-            n.position.x < x + w &&
-            n.position.x + n.size.width > x &&
-            n.position.y < y + h &&
-            n.position.y + n.size.height > y
-        ).map(n => n.id);
-        
-        state.potentialSelectionIds = hitNotes;
-        // We generally don't update selection state during drag to avoid excessive renders/logic, 
-        // but we visualize the box. Real selection happens on mouse up.
-        // However, we need to visualize highlighted notes.
-        // To do that, we'd need a state for 'potentialSelection'.
-        // Let's rely on selectionBox for now or trigger a state update if strictly needed.
-        // For performance, let's just update the box.
-    }
-    else if (state.mode === 'DRAGGING_NOTES') {
-        const delta = { 
-            x: (current.x - state.dragStart.x) / p.camera.z, 
-            y: (current.y - state.dragStart.y) / p.camera.z 
-        };
-        
-        if (p.selectedNoteIds.length > 0) {
-            p.onNoteMove(p.selectedNoteIds[0], delta);
-        }
-        state.dragStart = current;
-        
-        // Delete Zone Check
-        const deleteZoneSize = 200;
-        const distToCorner = Math.sqrt(
-            Math.pow(window.innerWidth - e.clientX, 2) + 
-            Math.pow(window.innerHeight - e.clientY, 2)
-        );
-        const isOver = distToCorner < deleteZoneSize;
-        if (isOver !== state.isOverDeleteZone) {
-            state.isOverDeleteZone = isOver;
-            setIsOverDeleteZone(isOver); // Trigger UI update
-        }
-    }
-    else if (state.mode === 'CONNECTING') {
-        setMouseWorldPos(worldPos); // UI Update
-        
-        const targetNote = p.notes.filter(n => n.id !== state.connectionStartId).find(n => 
-            worldPos.x >= n.position.x &&
-            worldPos.x <= n.position.x + n.size.width &&
-            worldPos.y >= n.position.y &&
-            worldPos.y <= n.position.y + n.size.height
-        );
-        
-        const targetId = targetNote ? targetNote.id : null;
-        if (targetId !== state.currentHoveredTargetId) {
-            state.currentHoveredTargetId = targetId;
-            setHoveredTargetId(targetId); // UI Update
-        }
-    }
-  }, [screenToWorld]);
-
   const handleMouseUp = useCallback((e: MouseEvent) => {
     const state = interactionState.current;
     const p = propsRef.current;
@@ -290,10 +209,7 @@ export const Canvas: React.FC<CanvasProps> = (props) => {
         if (state.currentHoveredTargetId) {
             p.onConnect(state.connectionStartId, state.currentHoveredTargetId);
         } else {
-            // Only create if dragged far enough, otherwise it might be accidental click
-            if (state.dragDistance > 10) {
-                // We use the last known mouse position from logic or re-calculate?
-                // Recalculate to be safe
+            if (state.dragDistance > 5) {
                 const worldPos = screenToWorld(e.clientX, e.clientY, p.camera);
                 p.onCreateAndConnect(state.connectionStartId, worldPos);
             }
@@ -314,21 +230,113 @@ export const Canvas: React.FC<CanvasProps> = (props) => {
         p.onDeleteNotes(p.selectedNoteIds);
     }
 
-    // Reset Logic
     state.mode = 'NONE';
     state.connectionStartId = null;
     state.currentHoveredTargetId = null;
     state.potentialSelectionIds = [];
     state.isOverDeleteZone = false;
     
-    // Reset UI
     setMode('NONE');
     setSelectionBox(null);
     setHoveredTargetId(null);
     setIsOverDeleteZone(false);
-    
-    // Temp state for connection line is cleared by mode='NONE'
   }, [screenToWorld]);
+
+  const handleMouseMove = useCallback((e: MouseEvent) => {
+    const state = interactionState.current;
+    if (state.mode === 'NONE') return;
+
+    if (e.buttons === 0) {
+        handleMouseUp(e);
+        return;
+    }
+
+    const p = propsRef.current;
+    const current = getClientCoords(e);
+    const dist = Math.sqrt(Math.pow(current.x - state.dragStart.x, 2) + Math.pow(current.y - state.dragStart.y, 2));
+    state.dragDistance = Math.max(state.dragDistance, dist);
+
+    const worldPos = screenToWorld(e.clientX, e.clientY, p.camera);
+
+    if (state.mode === 'PANNING') {
+        const delta = { x: current.x - state.dragStart.x, y: current.y - state.dragStart.y };
+        p.setCamera(prev => ({ ...prev, x: prev.x + delta.x, y: prev.y + delta.y }));
+        state.dragStart = current;
+    } 
+    else if (state.mode === 'SELECTING') {
+        const start = state.selectionStartWorld;
+        const newW = worldPos.x - start.x;
+        const newH = worldPos.y - start.y;
+        
+        setSelectionBox({ x: start.x, y: start.y, w: newW, h: newH });
+
+        const x = newW < 0 ? start.x + newW : start.x;
+        const y = newH < 0 ? start.y + newH : start.y;
+        const w = Math.abs(newW);
+        const h = Math.abs(newH);
+        
+        const hitNotes = p.notes.filter(n => 
+            n.position.x < x + w &&
+            n.position.x + n.size.width > x &&
+            n.position.y < y + h &&
+            n.position.y + n.size.height > y
+        ).map(n => n.id);
+        
+        state.potentialSelectionIds = hitNotes;
+    }
+    else if (state.mode === 'DRAGGING_NOTES') {
+        const delta = { 
+            x: (current.x - state.dragStart.x) / p.camera.z, 
+            y: (current.y - state.dragStart.y) / p.camera.z 
+        };
+        
+        if (p.selectedNoteIds.length > 0) {
+            p.onNoteMove(p.selectedNoteIds[0], delta);
+        }
+        state.dragStart = current;
+        
+        const deleteZoneSize = 200;
+        const distToCorner = Math.sqrt(
+            Math.pow(window.innerWidth - e.clientX, 2) + 
+            Math.pow(window.innerHeight - e.clientY, 2)
+        );
+        const isOver = distToCorner < deleteZoneSize;
+        if (isOver !== state.isOverDeleteZone) {
+            state.isOverDeleteZone = isOver;
+            setIsOverDeleteZone(isOver);
+        }
+    }
+    else if (state.mode === 'CONNECTING') {
+        setMouseWorldPos(worldPos);
+        const buffer = 20 / p.camera.z; 
+        
+        const candidates = p.notes.filter(n => n.id !== state.connectionStartId).filter(n => 
+            worldPos.x >= n.position.x - buffer &&
+            worldPos.x <= n.position.x + n.size.width + buffer &&
+            worldPos.y >= n.position.y - buffer &&
+            worldPos.y <= n.position.y + n.size.height + buffer
+        );
+
+        let targetId: string | null = null;
+        if (candidates.length > 0) {
+            let minDist = Infinity;
+            candidates.forEach(n => {
+                 const centerX = n.position.x + n.size.width / 2;
+                 const centerY = n.position.y + n.size.height / 2;
+                 const dist = Math.sqrt(Math.pow(worldPos.x - centerX, 2) + Math.pow(worldPos.y - centerY, 2));
+                 if (dist < minDist) {
+                     minDist = dist;
+                     targetId = n.id;
+                 }
+            });
+        }
+        
+        if (targetId !== state.currentHoveredTargetId) {
+            state.currentHoveredTargetId = targetId;
+            setHoveredTargetId(targetId);
+        }
+    }
+  }, [screenToWorld, handleMouseUp]);
 
   useEffect(() => {
     window.addEventListener('mousemove', handleMouseMove);
@@ -339,11 +347,6 @@ export const Canvas: React.FC<CanvasProps> = (props) => {
     };
   }, [handleMouseMove, handleMouseUp]);
 
-  // Temporary connection start ID for rendering only
-  // We can derive this from interactionState if we forced a re-render, 
-  // but we used setMode so we can use local state or just interactionState if we force update?
-  // Easier to use interactionState.current.connectionStartId but React won't see changes unless we state-ify it.
-  // We used setMode, which triggers render. interactionState.connectionStartId is set at same time.
   const tempConnectionStartId = interactionState.current.connectionStartId;
 
   const renderConnection = (id: string, startNote: NoteData, endCenter: Position, endSize?: Size) => {
@@ -354,26 +357,40 @@ export const Canvas: React.FC<CanvasProps> = (props) => {
     const startPoint = getIntersection(startCenter, startNote.size, endCenter);
     const endPoint = endSize ? getIntersection(endCenter, endSize, startCenter) : endCenter;
     const d = getPath(connectionStyle, startPoint, endPoint);
+    const isSelected = selectedConnectionId === id;
 
     return (
-      <path
-        key={id}
-        d={d}
-        stroke="#334155"
-        strokeWidth="3"
-        strokeLinecap="round"
-        fill="none"
-        markerEnd="url(#arrow)"
-      />
+      <g 
+        key={id} 
+        onClick={(e) => {
+            e.stopPropagation();
+            onConnectionSelect(id);
+            onNoteSelect([]); // Deselect notes when clicking connection
+        }}
+        className="cursor-pointer group"
+      >
+        {/* Invisible thick hit area */}
+        <path
+            d={d}
+            stroke="transparent"
+            strokeWidth="20"
+            fill="none"
+        />
+        {/* Visible Line */}
+        <path
+            d={d}
+            stroke={isSelected ? "#6366f1" : "#334155"}
+            strokeWidth={isSelected ? "4" : "3"}
+            strokeLinecap="round"
+            fill="none"
+            markerEnd={isSelected ? "url(#arrow-selected)" : "url(#arrow)"}
+            className="transition-colors duration-200 group-hover:stroke-indigo-400"
+        />
+      </g>
     );
   };
 
   const isNoteHighlighted = (id: string) => {
-      // For selection box logic, we haven't synced potentialSelectionIds to state for perf.
-      // If we want to highlight while dragging selection box, we need state.
-      // But user didn't ask for that specifically, and it simplifies perf.
-      // However, let's check if we want to add it back.
-      // The original code did. Let's rely on standard selectedNoteIds for now.
       return selectedNoteIds.includes(id);
   };
 
@@ -406,6 +423,9 @@ export const Canvas: React.FC<CanvasProps> = (props) => {
             <marker id="arrow" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
               <path d="M 0 0 L 10 5 L 0 10 z" fill="#334155" />
             </marker>
+            <marker id="arrow-selected" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+              <path d="M 0 0 L 10 5 L 0 10 z" fill="#6366f1" />
+            </marker>
           </defs>
 
           {connections.map(conn => {
@@ -435,15 +455,47 @@ export const Canvas: React.FC<CanvasProps> = (props) => {
                           endSize = target.size;
                       }
                   }
-                  return renderConnection("temp", startNote, endCenter, endSize);
+                  
+                  // Render temp connection manually since it's not in state
+                  const startCenter = { x: startNote.position.x + startNote.size.width/2, y: startNote.position.y + startNote.size.height/2 };
+                  const startPoint = getIntersection(startCenter, startNote.size, endCenter);
+                  const endPoint = endSize ? getIntersection(endCenter, endSize, startCenter) : endCenter;
+                  const d = getPath(connectionStyle, startPoint, endPoint);
+
+                  return (
+                      <path
+                        d={d}
+                        stroke="#334155"
+                        strokeWidth="3"
+                        strokeDasharray="5,5"
+                        fill="none"
+                        markerEnd="url(#arrow)"
+                        className="opacity-50"
+                      />
+                  );
               })()
           )}
         </svg>
+        
+        {/* Ghost Note Preview when dragging connection to empty space */}
+        {mode === 'CONNECTING' && !hoveredTargetId && (
+            <div
+                className="absolute border-2 border-dashed border-slate-300 bg-white/50 rounded-sm pointer-events-none flex items-center justify-center"
+                style={{
+                    left: mouseWorldPos.x - 140, // Centered (default width 280 / 2)
+                    top: mouseWorldPos.y - 70,   // Centered (default height 140 / 2)
+                    width: 280,
+                    height: 140,
+                }}
+            >
+                <span className="text-slate-400 font-bold text-sm">Release to Create</span>
+            </div>
+        )}
 
         {/* Selection Box */}
         {mode === 'SELECTING' && selectionBox && (
             <div 
-                className="absolute bg-slate-900/5 border-2 border-dashed border-slate-600 rounded-sm z-50 pointer-events-none"
+                className="absolute bg-blue-500/10 border border-blue-500/50 rounded-sm z-50 pointer-events-none"
                 style={{
                     left: selectionBox.w < 0 ? selectionBox.x + selectionBox.w : selectionBox.x,
                     top: selectionBox.h < 0 ? selectionBox.y + selectionBox.h : selectionBox.y,
@@ -461,14 +513,19 @@ export const Canvas: React.FC<CanvasProps> = (props) => {
             isSelected={isNoteHighlighted(note.id)}
             isDragging={mode === 'DRAGGING_NOTES' && selectedNoteIds.includes(note.id)}
             isTarget={hoveredTargetId === note.id}
-            onSelect={(id) => onNoteSelect([id])}
+            onSelect={(id) => {
+                // If not already selected and shift not held, clear others. 
+                // But this logic is handled in handleNoteMouseDown basically.
+                // onSelect just informs parent.
+                onNoteSelect([id]); 
+                onConnectionSelect(null);
+            }}
             onUpdate={onNoteUpdate}
             onMouseDown={handleNoteMouseDown}
           />
         ))}
       </div>
 
-      {/* Delete Zone */}
       <div 
         className={`fixed bottom-0 right-0 w-[200px] h-[200px] flex items-center justify-center transition-all duration-300 pointer-events-none no-print
             ${isOverDeleteZone 
