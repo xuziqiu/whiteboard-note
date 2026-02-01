@@ -110,6 +110,10 @@ export const NoteCard: React.FC<NoteCardProps> = ({
         }
       }}
       onDoubleClick={handleDoubleClick}
+      onContextMenu={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
+      }}
     >
       <div className="flex-1 p-4 flex flex-col justify-center min-h-[60px]">
         {isEditing ? (
